@@ -1,0 +1,32 @@
+.DS_Store
+
+# Xcode user data
+xcuserdata/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+
+# Build and derived outputs
+DerivedData/
+build/
+*.moved-aside
+*.ipa
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output/
+
+# Signing and secrets
+*.p12
+*.mobileprovision
+*.key
+*.cer
+.env
+
+# Logs
+*.log
