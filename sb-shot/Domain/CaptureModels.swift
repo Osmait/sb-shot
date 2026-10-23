@@ -18,12 +18,12 @@ enum CaptureAction: String, CaseIterable, Codable, Identifiable {
 
     var title: String {
         switch self {
-        case .captureArea: "Capturar área"
+        case .captureArea: "Capturar área o ventana"
         case .capturePreviousArea: "Capturar área anterior"
         case .captureFullscreen: "Capturar pantalla completa"
         case .captureWindow: "Capturar ventana"
         case .captureText: "Capturar texto (OCR)"
-        case .recordArea: "Grabar área"
+        case .recordArea: "Grabar área o ventana"
         case .recordFullscreen: "Grabar pantalla completa"
         case .openHistory: "Abrir historial"
         }

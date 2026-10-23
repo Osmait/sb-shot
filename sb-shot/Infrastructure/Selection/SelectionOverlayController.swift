@@ -39,7 +39,9 @@ final class SelectionSession {
     let options: SelectionOptions
     let windows: [OverlayWindowInfo]
 
-    var isWindowMode: Bool
+    /// Solo ventanas (accion "Capturar ventana"). Si no, el modo es inteligente:
+    /// arrastrar selecciona un area, clic elige la ventana o la pantalla bajo el cursor.
+    let isWindowOnly: Bool
     var mouseLocation = NSEvent.mouseLocation
     var dragStart: CGPoint?
     var dragCurrent: CGPoint?
@@ -50,15 +52,34 @@ final class SelectionSession {
     init(options: SelectionOptions, windows: [OverlayWindowInfo]) {
         self.options = options
         self.windows = windows
-        isWindowMode = options.startInWindowMode && options.allowsWindowMode
+        isWindowOnly = options.startInWindowMode && options.allowsWindowMode
     }
 
     var isDragging: Bool {
         dragStart != nil
     }
 
+    /// Hay un area en curso (el arrastre ya supero el umbral de un clic).
+    var isSelectingArea: Bool {
+        guard !isWindowOnly, let rect = selectionRect else { return false }
+        return rect.width > 4 || rect.height > 4
+    }
+
     var hoveredWindow: OverlayWindowInfo? {
         windows.first { $0.frame.contains(mouseLocation) }
+    }
+
+    /// Lo que se elegiria con un clic: la ventana bajo el cursor o, en el escritorio, la pantalla completa.
+    var clickTarget: ScreenSelection? {
+        guard options.allowsWindowMode else { return nil }
+        if let window = hoveredWindow {
+            return .window(id: window.id, frame: window.frame)
+        }
+        guard !isWindowOnly,
+              let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }),
+              let displayID = ScreenGeometry.displayID(of: screen)
+        else { return nil }
+        return .display(id: displayID, frame: screen.frame)
     }
 
     /// Rectangulo seleccionado en coordenadas globales, limitado a la pantalla donde empezo el arrastre.
@@ -82,13 +103,18 @@ final class SelectionSession {
     }
 
     var hint: String {
-        let base = switch options.purpose {
-        case .screenshot: "Arrastra para seleccionar"
-        case .recording: "Selecciona el área a grabar"
-        case .text: "Selecciona el texto a reconocer"
+        let prefix = switch options.purpose {
+        case .screenshot: ""
+        case .recording: "Grabar  ·  "
+        case .text: "Reconocer texto  ·  "
         }
-        let windowHint = options.allowsWindowMode ? (isWindowMode ? "  ·  Espacio: área" : "  ·  Espacio: ventana") : ""
-        return "\(base)\(windowHint)  ·  Enter: pantalla completa  ·  Esc: cancelar"
+        if isWindowOnly {
+            return "\(prefix)Clic en una ventana  ·  Enter: pantalla completa  ·  Esc: cancelar"
+        }
+        if options.allowsWindowMode {
+            return "\(prefix)Arrastra: área  ·  Clic: ventana  ·  Clic en el escritorio o Enter: pantalla completa  ·  Esc: cancelar"
+        }
+        return "\(prefix)Arrastra para seleccionar  ·  Enter: pantalla completa  ·  Esc: cancelar"
     }
 }
 
@@ -175,7 +201,6 @@ final class SelectionOverlayController: NSObject {
         }
     }
 
-    // swiftlint:disable:next cyclomatic_complexity
     private func handle(_ event: NSEvent) {
         guard let session else { return }
 
@@ -188,13 +213,8 @@ final class SelectionOverlayController: NSObject {
             switch event.keyCode {
             case 53:
                 finish(with: nil)
-            case 49 where !event.isARepeat:
-                if session.isDragging {
-                    session.isMovingSelection = true
-                } else if session.options.allowsWindowMode {
-                    session.isWindowMode.toggle()
-                    refreshAll()
-                }
+            case 49 where !event.isARepeat && session.isDragging:
+                session.isMovingSelection = true
             case 36, 76:
                 finishWithScreenUnderCursor()
             default:
@@ -357,7 +377,7 @@ private final class SelectionOverlayView: NSView {
         let point = globalPoint(for: event)
         session.mouseLocation = point
 
-        guard !session.isWindowMode else { return }
+        guard !session.isWindowOnly else { return }
         session.dragStart = point
         session.dragCurrent = point
         session.dragScreenFrame = screenFrame
@@ -381,20 +401,16 @@ private final class SelectionOverlayView: NSView {
     override func mouseUp(with event: NSEvent) {
         session.mouseLocation = globalPoint(for: event)
 
-        if session.isWindowMode {
-            if let window = session.hoveredWindow {
-                onFinish?(.window(id: window.id, frame: window.frame))
-            }
-            return
-        }
-
-        let rect = session.selectionRect?.integral
+        let rect = session.isWindowOnly ? nil : session.selectionRect?.integral
         session.dragStart = nil
         session.dragCurrent = nil
         session.isMovingSelection = false
 
         if let rect, rect.width >= 5, rect.height >= 5 {
             onFinish?(.area(rect))
+        } else if let target = session.clickTarget {
+            // Un clic sin arrastrar elige la ventana o la pantalla bajo el cursor.
+            onFinish?(target)
         } else {
             onChange?()
         }
@@ -418,17 +434,18 @@ private final class SelectionOverlayView: NSView {
     override func draw(_: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
 
-        if session.isWindowMode {
-            drawWindowMode(context)
+        let target = session.isSelectingArea ? nil : session.clickTarget
+        if let target {
+            drawClickTarget(target, in: context)
         } else {
             drawAreaMode(context)
         }
 
         if let mouse = localMouse {
-            if !session.isDragging, !session.isWindowMode, session.options.showsCrosshair {
+            if !session.isDragging, target == nil || session.hoveredWindow == nil, !session.isWindowOnly, session.options.showsCrosshair {
                 drawCrosshair(at: mouse, in: context)
             }
-            if !session.isWindowMode, session.options.showsMagnifier, let snapshot {
+            if !session.isWindowOnly, session.options.showsMagnifier, let snapshot {
                 drawMagnifier(at: mouse, snapshot: snapshot, in: context)
             }
             if !session.isDragging {
@@ -458,22 +475,36 @@ private final class SelectionOverlayView: NSView {
         drawDimensionLabel("\(Int(rect.width)) × \(Int(rect.height))", below: selection, in: context)
     }
 
-    private func drawWindowMode(_ context: CGContext) {
-        context.setFillColor(NSColor.black.withAlphaComponent(0.2).cgColor)
-        context.fill(bounds)
+    /// Resalta lo que se elegiria con un clic: el resto queda oscurecido y el objetivo con borde de acento.
+    private func drawClickTarget(_ target: ScreenSelection, in context: CGContext) {
+        let frame = toLocal(target.frame).intersection(bounds)
+        let isOnThisScreen = !frame.isNull && !frame.isEmpty
 
-        guard let window = session.hoveredWindow else { return }
-        let frame = toLocal(window.frame)
-        guard frame.intersects(bounds) else { return }
+        context.saveGState()
+        context.addRect(bounds)
+        if isOnThisScreen {
+            context.addRect(frame)
+        }
+        context.setFillColor(NSColor.black.withAlphaComponent(0.4).cgColor)
+        context.fillPath(using: .evenOdd)
+        context.restoreGState()
 
-        context.setFillColor(NSColor.controlAccentColor.withAlphaComponent(0.25).cgColor)
+        guard isOnThisScreen else { return }
+
+        context.setFillColor(NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor)
         context.fill(frame)
         context.setStrokeColor(NSColor.controlAccentColor.cgColor)
         context.setLineWidth(3)
         context.stroke(frame.insetBy(dx: 1.5, dy: 1.5))
 
-        let name = window.ownerName.map { "\($0)  ·  " } ?? ""
-        let label = "\(name)\(Int(window.frame.width)) × \(Int(window.frame.height))"
+        let label: String
+        switch target {
+        case .window:
+            let name = session.hoveredWindow?.ownerName.map { "\($0)  ·  " } ?? "Ventana  ·  "
+            label = "\(name)\(Int(target.frame.width)) × \(Int(target.frame.height))"
+        case .display, .area:
+            label = "Pantalla completa  ·  \(Int(target.frame.width)) × \(Int(target.frame.height))"
+        }
         drawPill(label, centeredAt: CGPoint(x: frame.midX, y: frame.midY), in: context, fontSize: 13)
     }
 

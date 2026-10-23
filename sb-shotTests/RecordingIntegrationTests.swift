@@ -90,9 +90,10 @@ struct RecordingIntegrationTests {
         let (frame, _) = try await generator.image(at: CMTime(seconds: 0.5, preferredTimescale: 600))
         let corner = try #require(frame.cropping(to: CGRect(x: 4, y: 4, width: 1, height: 1)))
         var pixel = [UInt8](repeating: 0, count: 4)
-        let context = try #require(try CGContext(
+        let sRGB = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try #require(CGContext(
             data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
-            space: #require(CGColorSpace(name: CGColorSpace.sRGB)), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            space: sRGB, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ))
         context.draw(corner, in: CGRect(x: 0, y: 0, width: 1, height: 1))
         #expect(pixel[0] > 200 && pixel[1] < 60 && pixel[2] < 60, "La esquina debería ser del fondo rojo")

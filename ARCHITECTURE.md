@@ -7,7 +7,7 @@ Herramienta de captura y grabacion de pantalla para macOS (alternativa a CleanSh
 | Area | Que incluye |
 |---|---|
 | Captura | Area, area anterior, pantalla completa, ventana (con o sin sombra), temporizador (3/5/10 s), texto con OCR (Vision) |
-| Seleccion | Una ventana por pantalla, reticula, lupa con pixeles y color, medidas en vivo, Espacio para alternar area/ventana, mantener Espacio para mover, Shift para cuadrado, Enter para pantalla completa, pantalla congelada opcional |
+| Seleccion | Modo inteligente: arrastrar = area, clic = ventana bajo el cursor, clic en el escritorio o Enter = pantalla completa. Una ventana de overlay por pantalla, reticula, lupa con pixeles y color, medidas en vivo, mantener Espacio para mover, Shift para cuadrado, pantalla congelada opcional |
 | Grabacion | Area, pantalla o ventana a MP4 (H.264) o GIF, 24/30/60 fps, cursor, resaltado de clics, audio del sistema, microfono, cuenta regresiva, barra de control (detener, reiniciar, descartar) |
 | Acceso rapido | Pila de miniaturas con Copiar, Guardar, Anotar, Fijar, arrastrar y soltar, deslizar para descartar, cierre automatico configurable |
 | Editor | Seleccionar/mover/redimensionar, flecha, linea, rectangulo, elipse, texto sobre el lienzo, contador numerado, lapiz, resaltador, pixelar/desenfocar, foco, recorte, fondo con degradado/margen/esquinas/sombra, deshacer, atajos de teclado |

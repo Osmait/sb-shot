@@ -129,7 +129,9 @@ private struct CaptureSettingsTab: View {
             }
 
             Section("Atajos dentro de la selección") {
-                hint("Espacio", "Alternar entre área y ventana")
+                hint("Arrastrar", "Seleccionar un área")
+                hint("Clic", "Elegir la ventana bajo el cursor")
+                hint("Clic en el escritorio", "Elegir la pantalla completa")
                 hint("Mantener Espacio", "Mover la selección mientras arrastras")
                 hint("Shift", "Selección cuadrada")
                 hint("Enter", "Capturar la pantalla completa")
