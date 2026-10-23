@@ -1,43 +1,58 @@
 import AppKit
 import Carbon
 
+/// Registra los atajos globales de cada accion con Carbon.
 final class HotkeyManager {
-    var onHotKeyPressed: (() -> Void)?
+    var onHotKeyPressed: ((CaptureAction) -> Void)?
 
     private var eventHandler: EventHandlerRef?
-    private var hotKeyRef: EventHotKeyRef?
-    private var currentHotKeyID = EventHotKeyID(signature: HotkeyManager.signature, id: 1)
+    private var hotKeyRefs: [EventHotKeyRef] = []
+    private var registered: [CaptureAction: GlobalShortcut] = [:]
 
     init() {
         installHandler()
     }
 
     deinit {
-        unregisterCurrentHotKey()
+        for ref in hotKeyRefs {
+            UnregisterEventHotKey(ref)
+        }
         if let eventHandler {
             RemoveEventHandler(eventHandler)
         }
     }
 
-    func register(shortcut: GlobalShortcut?) {
-        unregisterCurrentHotKey()
+    func register(_ shortcuts: [CaptureAction: GlobalShortcut]) {
+        guard shortcuts != registered else { return }
+        unregisterAll()
 
-        guard let shortcut else { return }
+        for (action, shortcut) in shortcuts {
+            guard let index = CaptureAction.allCases.firstIndex(of: action) else { continue }
 
-        let modifiers = carbonModifiers(from: shortcut.modifiers)
-        var hotKeyRef: EventHotKeyRef?
+            var hotKeyRef: EventHotKeyRef?
+            let hotKeyID = EventHotKeyID(signature: Self.signature, id: UInt32(index + 1))
+            let status = RegisterEventHotKey(
+                shortcut.keyCode,
+                carbonModifiers(from: shortcut.modifiers),
+                hotKeyID,
+                GetApplicationEventTarget(),
+                0,
+                &hotKeyRef
+            )
 
-        let status = RegisterEventHotKey(
-            shortcut.keyCode,
-            modifiers,
-            currentHotKeyID,
-            GetApplicationEventTarget(),
-            0,
-            &hotKeyRef
-        )
+            if status == noErr, let hotKeyRef {
+                hotKeyRefs.append(hotKeyRef)
+            }
+        }
+        registered = shortcuts
+    }
 
-        guard status == noErr else { return }
-        self.hotKeyRef = hotKeyRef
+    private func unregisterAll() {
+        for ref in hotKeyRefs {
+            UnregisterEventHotKey(ref)
+        }
+        hotKeyRefs.removeAll()
+        registered = [:]
     }
 
     private func installHandler() {
@@ -72,27 +87,30 @@ final class HotkeyManager {
             &hotKeyID
         )
 
-        guard status == noErr else { return status }
-        guard hotKeyID.signature == Self.signature else { return noErr }
+        guard status == noErr, hotKeyID.signature == Self.signature else { return status }
 
-        onHotKeyPressed?()
+        let index = Int(hotKeyID.id) - 1
+        guard CaptureAction.allCases.indices.contains(index) else { return noErr }
+
+        onHotKeyPressed?(CaptureAction.allCases[index])
         return noErr
-    }
-
-    private func unregisterCurrentHotKey() {
-        if let hotKeyRef {
-            UnregisterEventHotKey(hotKeyRef)
-            self.hotKeyRef = nil
-        }
     }
 
     private func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {
         var modifiers: UInt32 = 0
 
-        if flags.contains(.command) { modifiers |= UInt32(cmdKey) }
-        if flags.contains(.option) { modifiers |= UInt32(optionKey) }
-        if flags.contains(.control) { modifiers |= UInt32(controlKey) }
-        if flags.contains(.shift) { modifiers |= UInt32(shiftKey) }
+        if flags.contains(.command) {
+            modifiers |= UInt32(cmdKey)
+        }
+        if flags.contains(.option) {
+            modifiers |= UInt32(optionKey)
+        }
+        if flags.contains(.control) {
+            modifiers |= UInt32(controlKey)
+        }
+        if flags.contains(.shift) {
+            modifiers |= UInt32(shiftKey)
+        }
 
         return modifiers
     }

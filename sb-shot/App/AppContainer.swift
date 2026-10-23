@@ -3,51 +3,102 @@ import Foundation
 
 @MainActor
 final class AppContainer {
-    let shortcutSettingsStore = ShortcutSettingsStore()
+    let settings = AppSettings()
+    let fileStorage = FileStorage()
+    let history = HistoryStore()
 
     private let permissionService = PermissionService()
     private let clipboardService = ClipboardService()
     private let captureService = ScreenCaptureService()
-    private let selector = SelectionOverlayRegionSelector()
-    private let previewPresenter = PreviewWindowPresenter()
-    private let editorPresenter = EditorWindowPresenter()
-    private let thumbnailPresenter = ThumbnailWindowPresenter()
+    private let recordingService = ScreenRecordingService()
     private let hotkeyManager = HotkeyManager()
+    private let toast = ToastController()
+    private let countdown = CountdownController()
     private var cancellables = Set<AnyCancellable>()
 
+    private lazy var selector = SelectionOverlayRegionSelector(capturer: captureService)
+
+    private lazy var useCase = CaptureScreenshotUseCase(
+        permissions: permissionService,
+        selector: selector,
+        capturer: captureService,
+        countdown: countdown
+    )
+
+    lazy var outputHandler = CaptureOutputHandler(
+        settings: settings,
+        clipboard: clipboardService,
+        files: fileStorage,
+        history: history,
+        quickAccess: QuickAccessController(settings: settings),
+        editor: EditorWindowPresenter(),
+        videoEditor: VideoEditorWindowPresenter(),
+        pins: PinnedImagePresenter(),
+        toast: toast
+    )
+
+    lazy var captureViewModel = CaptureFlowViewModel(
+        useCase: useCase,
+        settings: settings,
+        output: outputHandler,
+        textRecognizer: TextRecognitionService(),
+        toast: toast
+    )
+
+    lazy var recordingViewModel = RecordingViewModel(
+        useCase: useCase,
+        permissions: permissionService,
+        selector: selector,
+        recorder: recordingService,
+        controls: RecordingControlsController(),
+        countdown: countdown,
+        clickHighlighter: ClickHighlighter(),
+        settings: settings,
+        output: outputHandler,
+        toast: toast
+    )
+
+    lazy var historyPresenter: HistoryPresenting = HistoryWindowPresenter(
+        store: history,
+        actions: HistoryActions(
+            open: { [weak self] entry, url in self?.outputHandler.openHistoryEntry(entry, url: url) },
+            copy: { [weak self] entry, url in self?.outputHandler.copyHistoryEntry(entry, url: url) },
+            reveal: { [weak self] url in self?.outputHandler.reveal(url) }
+        )
+    )
+
     init() {
-        bindHotkeySettings()
+        bindHotkeys()
     }
 
-    lazy var captureViewModel: CaptureFlowViewModel = {
-        let useCase = CaptureRegionUseCase(
-            permissions: permissionService,
-            selector: selector,
-            capturer: captureService,
-            clipboard: clipboardService
-        )
+    func perform(_ action: CaptureAction) {
+        switch action {
+        case .captureArea: captureViewModel.capture(.area)
+        case .capturePreviousArea: captureViewModel.capture(.previousArea)
+        case .captureFullscreen: captureViewModel.capture(.fullscreen)
+        case .captureWindow: captureViewModel.capture(.window)
+        case .captureText: captureViewModel.captureText()
+        case .recordArea: recordingViewModel.toggle(fullscreen: false)
+        case .recordFullscreen: recordingViewModel.toggle(fullscreen: true)
+        case .openHistory: historyPresenter.show()
+        }
+    }
 
-        return CaptureFlowViewModel(
-            useCase: useCase,
-            thumbnailPresenter: thumbnailPresenter,
-            previewPresenter: previewPresenter,
-            editorPresenter: editorPresenter,
-            clipboard: clipboardService
-        )
-    }()
-
-    private func bindHotkeySettings() {
-        hotkeyManager.onHotKeyPressed = { [weak self] in
+    private func bindHotkeys() {
+        hotkeyManager.onHotKeyPressed = { [weak self] action in
             Task { @MainActor in
-                self?.captureViewModel.captureRegion()
+                self?.perform(action)
             }
         }
 
-        shortcutSettingsStore.$shortcut
-            .combineLatest(shortcutSettingsStore.$isRecordingShortcut)
-            .sink { [weak self] shortcut, isRecording in
-                self?.hotkeyManager.register(shortcut: isRecording ? nil : shortcut)
-            }
+        registerHotkeys()
+        settings.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.registerHotkeys() }
             .store(in: &cancellables)
+    }
+
+    private func registerHotkeys() {
+        hotkeyManager.register(settings.recordingShortcutFor == nil ? settings.activeShortcuts : [:])
     }
 }

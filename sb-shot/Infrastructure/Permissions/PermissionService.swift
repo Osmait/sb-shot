@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 
 struct PermissionService {
     func hasScreenRecordingAccess() -> Bool {
@@ -15,6 +16,17 @@ struct PermissionService {
         }
 
         NSWorkspace.shared.open(url)
+    }
+
+    func requestMicrophoneAccess() async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            true
+        case .notDetermined:
+            await AVCaptureDevice.requestAccess(for: .audio)
+        default:
+            false
+        }
     }
 }
 
