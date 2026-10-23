@@ -172,6 +172,17 @@ struct AnnotationRenderer {
     // MARK: - Private
 
     private func drawBackground(_ background: BackgroundSettings, size: CGSize, in context: CGContext) {
+        if let original = background.wallpaper {
+            let wallpaper = WallpaperBlur.image(original, radius: background.wallpaperBlur)
+            let canvas = CGRect(origin: .zero, size: size)
+            context.saveGState()
+            context.clip(to: canvas)
+            context.interpolationQuality = .high
+            drawUpright(wallpaper, in: .aspectFill(CGSize(width: wallpaper.width, height: wallpaper.height), in: canvas), context: context)
+            context.restoreGState()
+            return
+        }
+
         let colors = background.preset.colors.map { NSColor($0).cgColor } as CFArray
         guard let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB), colors: colors, locations: nil) else { return }
 

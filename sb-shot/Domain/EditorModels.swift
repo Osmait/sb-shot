@@ -197,6 +197,10 @@ struct BackgroundSettings: Equatable {
     var cornerRadius: CGFloat = 12
     var shadow = true
     var aspect: BackgroundAspect = .auto
+    /// Fondo de pantalla del usuario. Si existe, reemplaza al degradado.
+    var wallpaper: CGImage?
+    /// Desenfoque del fondo de pantalla, en pixeles de una imagen de referencia de 1600 px.
+    var wallpaperBlur: CGFloat = 0
 
     var preset: BackgroundPreset {
         BackgroundPreset.all[min(max(presetIndex, 0), BackgroundPreset.all.count - 1)]

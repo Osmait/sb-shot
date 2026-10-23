@@ -430,6 +430,7 @@ private struct BackgroundSection: View {
                     Button {
                         viewModel.updateBackground {
                             $0.presetIndex = preset.id
+                            $0.wallpaper = nil
                             $0.isEnabled = true
                         }
                     } label: {
@@ -439,11 +440,22 @@ private struct BackgroundSection: View {
                             .overlay(
                                 RoundedRectangle(cornerRadius: 8)
                                     .strokeBorder(Color.white, lineWidth: 2)
-                                    .opacity(background.isEnabled && background.presetIndex == preset.id ? 1 : 0)
+                                    .opacity(background.isEnabled && background.wallpaper == nil && background.presetIndex == preset.id ? 1 : 0)
                             )
                     }
                     .buttonStyle(.plain)
                 }
+            }
+
+            WallpaperTile(isSelected: background.isEnabled && background.wallpaper != nil, height: 40) { image in
+                viewModel.updateBackground {
+                    $0.wallpaper = image
+                    $0.isEnabled = true
+                }
+            }
+
+            if background.wallpaper != nil {
+                InspectorSlider(title: "Desenfoque", value: backgroundBinding(\.wallpaperBlur, key: "wallpaperBlur"), range: 0 ... 40)
             }
 
             InspectorSlider(title: "Margen", value: backgroundBinding(\.padding, key: "padding"), range: 0 ... 200)

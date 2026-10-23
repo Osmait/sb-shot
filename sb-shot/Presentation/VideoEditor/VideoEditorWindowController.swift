@@ -246,6 +246,7 @@ private final class VideoEditorModel: ObservableObject {
         return VideoBackgroundStyle(
             startColor: colors.first ?? CGColor(gray: 0, alpha: 1),
             endColor: colors.last ?? CGColor(gray: 0, alpha: 1),
+            image: background.wallpaper.map { WallpaperBlur.image($0, radius: background.wallpaperBlur) },
             padding: background.padding,
             cornerRadius: background.cornerRadius,
             shadow: background.shadow,
@@ -742,7 +743,7 @@ private struct ExportPanel: View {
     }
 }
 
-/// Fondo del video: degradado, margen, esquinas, sombra y proporcion, como en el editor de capturas.
+/// Fondo del video: degradado o fondo de pantalla, margen, esquinas, sombra y proporcion, como en el editor de capturas.
 private struct VideoBackgroundSection: View {
     @ObservedObject var model: VideoEditorModel
 
@@ -769,6 +770,7 @@ private struct VideoBackgroundSection: View {
                     Button {
                         model.updateBackground {
                             $0.presetIndex = preset.id
+                            $0.wallpaper = nil
                             $0.isEnabled = true
                         }
                     } label: {
@@ -778,11 +780,22 @@ private struct VideoBackgroundSection: View {
                             .overlay(
                                 RoundedRectangle(cornerRadius: 8)
                                     .strokeBorder(Color.white, lineWidth: 2)
-                                    .opacity(background.isEnabled && background.presetIndex == preset.id ? 1 : 0)
+                                    .opacity(background.isEnabled && background.wallpaper == nil && background.presetIndex == preset.id ? 1 : 0)
                             )
                     }
                     .buttonStyle(.plain)
                 }
+            }
+
+            WallpaperTile(isSelected: background.isEnabled && background.wallpaper != nil, height: 34) { image in
+                model.updateBackground {
+                    $0.wallpaper = image
+                    $0.isEnabled = true
+                }
+            }
+
+            if background.wallpaper != nil {
+                InspectorSlider(title: "Desenfoque", value: binding(\.wallpaperBlur), range: 0 ... 40)
             }
 
             InspectorSlider(title: "Margen", value: binding(\.padding), range: 0 ... 200)
