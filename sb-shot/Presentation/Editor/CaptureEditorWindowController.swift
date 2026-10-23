@@ -1,28 +1,47 @@
 import AppKit
 import SwiftUI
 
-final class CaptureEditorWindowController: NSWindowController {
-    private let closeDelegate: WindowDelegate
+final class CaptureEditorWindowController: NSWindowController, NSWindowDelegate {
+    var onClose: (() -> Void)?
+
     private let viewModel: CaptureEditorViewModel
+    private let actions: EditorActions
+    private var keyMonitor: Any?
 
-    init(image: NSImage, onCopy: @escaping (NSImage) -> Void, onClose: @escaping () -> Void) {
-        closeDelegate = WindowDelegate(onClose: onClose)
+    init(image: NSImage, actions: EditorActions) {
         viewModel = CaptureEditorViewModel(baseImage: image)
+        self.actions = actions
 
-        let contentView = CaptureEditorView(viewModel: viewModel, onCopy: onCopy)
-        let hostingController = NSHostingController(rootView: contentView)
-        let window = NSWindow(contentViewController: hostingController)
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        let window = NSWindow(
+            contentRect: CGRect(origin: .zero, size: Self.preferredSize(for: image)),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.backgroundColor = NSColor(red: 0.11, green: 0.11, blue: 0.12, alpha: 1)
+        window.title = "Anotar captura"
+        window.backgroundColor = NSColor(EditorColors.windowBackground)
         window.appearance = NSAppearance(named: .darkAqua)
-        window.minSize = NSSize(width: 780, height: 520)
-        window.setContentSize(Self.preferredSize(for: image))
+        window.minSize = NSSize(width: 960, height: 560)
         window.isReleasedWhenClosed = false
+        window.tabbingMode = .disallowed
 
         super.init(window: window)
-        self.window?.delegate = closeDelegate
+
+        let renderedFile = { [weak viewModel] () -> URL? in
+            guard let image = viewModel?.renderedImage() else { return nil }
+            return Self.writeDragFile(for: image)
+        }
+
+        window.contentView = NSHostingView(rootView: CaptureEditorView(
+            viewModel: viewModel,
+            onCopy: { [weak self] in self?.copyImage() },
+            onSave: { [weak self] in self?.saveImage() },
+            onPin: { [weak self] in self?.pinImage() },
+            dragFile: renderedFile
+        ))
+        window.delegate = self
     }
 
     @available(*, unavailable)
@@ -32,428 +51,494 @@ final class CaptureEditorWindowController: NSWindowController {
 
     func show() {
         NSApp.activate(ignoringOtherApps: true)
-        showWindow(nil)
         window?.center()
+        showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+        installKeyMonitor()
+    }
+
+    func windowWillClose(_: Notification) {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
+        }
+        onClose?()
+    }
+
+    // MARK: - Actions
+
+    private func copyImage() {
+        actions.onCopy(viewModel.renderedImage())
+    }
+
+    private func saveImage() {
+        actions.onSave(viewModel.renderedImage())
+    }
+
+    private func saveImageAs() {
+        actions.onSaveAs(viewModel.renderedImage())
+    }
+
+    private func pinImage() {
+        actions.onPin(viewModel.renderedImage())
+    }
+
+    // MARK: - Keyboard
+
+    private func installKeyMonitor() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, let window, event.window === window else { return event }
+            return handleKey(event) ? nil : event
+        }
+    }
+
+    // swiftlint:disable:next cyclomatic_complexity
+    private func handleKey(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let characters = event.charactersIgnoringModifiers?.lowercased() ?? ""
+
+        // Mientras se escribe texto solo se interceptan Esc y los comandos de guardar o copiar el resultado.
+        let isTyping = viewModel.editingTextID != nil || window?.firstResponder is NSTextView
+        if isTyping {
+            if event.keyCode == 53 {
+                viewModel.commitTextEditing()
+                return true
+            }
+            return false
+        }
+
+        if flags.contains(.command) {
+            switch (characters, flags.contains(.shift)) {
+            case ("z", false): viewModel.undo()
+            case ("z", true): viewModel.redo()
+            case ("c", false): copyImage()
+            case ("s", false): saveImage()
+            case ("s", true): saveImageAs()
+            case ("p", false): pinImage()
+            default: return false
+            }
+            return true
+        }
+
+        switch event.keyCode {
+        case 51, 117:
+            viewModel.deleteSelection()
+            return true
+        case 53:
+            if viewModel.isCropping {
+                viewModel.cancelCrop()
+            } else {
+                viewModel.deselect()
+            }
+            return true
+        case 36, 76:
+            if viewModel.isCropping {
+                viewModel.confirmCrop()
+                return true
+            }
+            return false
+        default:
+            break
+        }
+
+        guard flags.subtracting(.shift).isEmpty, let key = characters.first else { return false }
+        if let tool = EditorTool.allCases.first(where: { $0.shortcutKey == key }) {
+            viewModel.activeTool = tool
+            return true
+        }
+        return false
+    }
+
+    // MARK: - Helpers
+
+    private static func writeDragFile(for image: NSImage) -> URL? {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sb-shot", isDirectory: true)
+            .appendingPathComponent("captura-editada.png")
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+        guard
+            let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+            let data = NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
+        else { return nil }
+
+        try? data.write(to: url, options: .atomic)
+        return url
     }
 
     private static func preferredSize(for image: NSImage) -> NSSize {
-        let width = min(max(image.size.width + 180, 900), 1500)
-        let height = min(max(image.size.height + 180, 620), 980)
+        let screen = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1440, height: 900)
+        let width = min(max(image.size.width + 120, 1000), screen.width * 0.9)
+        let height = min(max(image.size.height + 200, 640), screen.height * 0.9)
         return NSSize(width: width, height: height)
     }
 }
 
-private final class WindowDelegate: NSObject, NSWindowDelegate {
-    private let onClose: () -> Void
-
-    init(onClose: @escaping () -> Void) {
-        self.onClose = onClose
-    }
-
-    func windowWillClose(_: Notification) {
-        onClose()
-    }
-}
+// MARK: - Root view
 
 private struct CaptureEditorView: View {
     @ObservedObject var viewModel: CaptureEditorViewModel
-    let onCopy: (NSImage) -> Void
+    let onCopy: () -> Void
+    let onSave: () -> Void
+    let onPin: () -> Void
+    let dragFile: () -> URL?
 
     var body: some View {
         VStack(spacing: 0) {
-            toolbar
-                .padding(.top, 38)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 8)
+            EditorToolbar(viewModel: viewModel)
+                .padding(.leading, 84)
+                .padding(.trailing, 12)
+                .frame(height: 52)
+                .background(WindowDragArea())
 
-            CaptureEditorCanvasView(viewModel: viewModel)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Divider().overlay(EditorColors.groupBorder)
 
-            bottomBar
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-        }
-        .background(EditorColors.canvasBackground)
-    }
+            HStack(spacing: 0) {
+                EditorCanvasView(viewModel: viewModel)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-    // MARK: - Toolbar
-
-    private var toolbar: some View {
-        HStack(spacing: 10) {
-            toolGroup
-            styleGroup
-
-            if viewModel.activeTool == .text {
-                TextField("Texto", text: $viewModel.textDraft)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
-                    .frame(width: 140)
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
-            }
-
-            Spacer()
-
-            undoRedoGroup
-        }
-        .animation(.easeInOut(duration: 0.2), value: viewModel.activeTool)
-    }
-
-    private var toolGroup: some View {
-        HStack(spacing: 2) {
-            ForEach(EditorTool.allCases) { tool in
-                ToolButton(icon: tool.iconName, isSelected: viewModel.activeTool == tool) {
-                    viewModel.activeTool = tool
+                if viewModel.showsBackgroundPanel {
+                    Divider().overlay(EditorColors.groupBorder)
+                    BackgroundInspector(viewModel: viewModel)
+                        .frame(width: 250)
+                        .transition(.move(edge: .trailing))
                 }
             }
+
+            Divider().overlay(EditorColors.groupBorder)
+
+            bottomBar
+                .padding(.horizontal, 12)
+                .frame(height: 48)
         }
-        .toolbarGroup()
+        .background(EditorColors.windowBackground)
+        .ignoresSafeArea(.container, edges: .top)
+        .animation(.easeInOut(duration: 0.2), value: viewModel.showsBackgroundPanel)
     }
-
-    private var styleGroup: some View {
-        HStack(spacing: 6) {
-            ColorPicker("", selection: $viewModel.strokeColor)
-                .labelsHidden()
-                .frame(width: 24)
-
-            Slider(value: $viewModel.lineWidth, in: 1 ... 14)
-                .frame(width: 80)
-
-            Button {
-                viewModel.fillShapes.toggle()
-            } label: {
-                Image(systemName: viewModel.fillShapes ? "square.fill" : "square")
-                    .font(.system(size: 12, weight: .medium))
-                    .frame(width: 26, height: 26)
-                    .foregroundStyle(viewModel.fillShapes ? .white : .secondary)
-            }
-            .buttonStyle(.plain)
-        }
-        .toolbarGroup()
-    }
-
-    private var undoRedoGroup: some View {
-        HStack(spacing: 2) {
-            Button {
-                viewModel.undo()
-            } label: {
-                Image(systemName: "arrow.uturn.backward")
-                    .font(.system(size: 12, weight: .medium))
-                    .frame(width: 28, height: 26)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(viewModel.canUndo ? .white : .white.opacity(0.25))
-            .disabled(!viewModel.canUndo)
-
-            Button {
-                viewModel.redo()
-            } label: {
-                Image(systemName: "arrow.uturn.forward")
-                    .font(.system(size: 12, weight: .medium))
-                    .frame(width: 28, height: 26)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(viewModel.canRedo ? .white : .white.opacity(0.25))
-            .disabled(!viewModel.canRedo)
-        }
-        .toolbarGroup()
-    }
-
-    // MARK: - Bottom Bar
 
     private var bottomBar: some View {
         HStack(spacing: 8) {
             Button {
+                viewModel.showsBackgroundPanel.toggle()
+            } label: {
+                Label("Fondo", systemImage: "square.on.square.squareshape.controlhandles")
+            }
+            .buttonStyle(ActionButtonStyle(isPrimary: false, isActive: viewModel.showsBackgroundPanel))
+            .help("Agregar fondo, margen y sombra")
+
+            Button {
                 viewModel.clear()
             } label: {
                 Label("Limpiar", systemImage: "trash")
-                    .font(.system(size: 12, weight: .medium))
             }
             .buttonStyle(ActionButtonStyle(isPrimary: false))
-            .disabled(viewModel.annotations.isEmpty)
+            .disabled(viewModel.document.annotations.isEmpty)
 
             Spacer()
 
-            if !viewModel.annotations.isEmpty {
-                Text("\(viewModel.annotations.count) anotacion\(viewModel.annotations.count == 1 ? "" : "es")")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
+            Text("\(Int(viewModel.outputPixelSize.width)) × \(Int(viewModel.outputPixelSize.height)) px")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
 
             Spacer()
 
-            Button("Guardar") {
-                saveImage(viewModel.renderedImage())
+            DragChip(dragFile: dragFile)
+
+            Button(action: onPin) {
+                Image(systemName: "pin")
             }
             .buttonStyle(ActionButtonStyle(isPrimary: false))
+            .help("Fijar en pantalla (⌘P)")
 
-            Button {
-                onCopy(viewModel.renderedImage())
-            } label: {
+            Button("Guardar", action: onSave)
+                .buttonStyle(ActionButtonStyle(isPrimary: false))
+                .help("Guardar en la carpeta de capturas (⌘S) · Guardar como (⇧⌘S)")
+
+            Button(action: onCopy) {
                 Label("Copiar", systemImage: "doc.on.doc")
             }
             .buttonStyle(ActionButtonStyle())
-            .keyboardShortcut("c", modifiers: [.command])
+            .help("Copiar al portapapeles (⌘C)")
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(EditorColors.groupBorder, lineWidth: 1))
-    }
-
-    private func saveImage(_ image: NSImage) {
-        ImageExporter.savePNG(image, defaultName: "captura-editada.png")
     }
 }
 
-private struct CaptureEditorCanvasView: View {
-    @ObservedObject var viewModel: CaptureEditorViewModel
-
-    @State private var dragStart: CGPoint?
-    @State private var dragCurrent: CGPoint?
-    @State private var freehandPoints: [CGPoint] = []
+/// Chip que se arrastra para soltar la imagen editada en otra app.
+private struct DragChip: View {
+    let dragFile: () -> URL?
 
     var body: some View {
-        GeometryReader { proxy in
-            let imageSize = viewModel.baseImage.size
-            let imageFrame = fittedRect(container: proxy.size, content: imageSize)
+        ZStack {
+            Label("Arrastrar", systemImage: "hand.draw")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(EditorColors.hoverFill, in: RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(EditorColors.groupBorder, style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
 
-            ZStack(alignment: .topLeading) {
-                EditorColors.canvasBackground
+            FileDragSource(fileURL: dragFile, previewImage: nil)
+        }
+        .fixedSize()
+        .help("Arrastra la captura a otra app")
+    }
+}
 
-                Image(nsImage: viewModel.baseImage)
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: imageFrame.width, height: imageFrame.height)
-                    .shadow(color: .black.opacity(0.5), radius: 20, y: 4)
-                    .position(x: imageFrame.midX, y: imageFrame.midY)
+// MARK: - Toolbar
 
-                Canvas { context, _ in
-                    drawAnnotations(context: context, imageFrame: imageFrame, imageSize: imageSize)
+private struct EditorToolbar: View {
+    @ObservedObject var viewModel: CaptureEditorViewModel
+
+    var body: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 2) {
+                ForEach(EditorTool.allCases) { tool in
+                    ToolButton(icon: tool.iconName, isSelected: viewModel.activeTool == tool) {
+                        viewModel.activeTool = tool
+                    }
+                    .help("\(tool.title) (\(String(tool.shortcutKey).uppercased()))")
                 }
             }
-            .contentShape(Rectangle())
-            .gesture(editorGesture(imageFrame: imageFrame, imageSize: imageSize))
-        }
-    }
+            .toolbarGroup()
 
-    private func drawAnnotations(context: GraphicsContext, imageFrame: CGRect, imageSize: CGSize) {
-        for annotation in viewModel.annotations {
-            draw(annotation: annotation, context: context, imageFrame: imageFrame, imageSize: imageSize)
-        }
-
-        if let preview = previewAnnotation() {
-            draw(annotation: preview, context: context, imageFrame: imageFrame, imageSize: imageSize)
-        }
-    }
-
-    private func draw(annotation: EditorAnnotation, context: GraphicsContext, imageFrame: CGRect, imageSize: CGSize) {
-        let strokeStyle = StrokeStyle(lineWidth: annotation.style.lineWidth, lineCap: .round, lineJoin: .round)
-        let color = annotation.style.color
-
-        switch annotation.kind {
-        case let .line(start, end):
-            var path = Path()
-            path.move(to: mapToView(start, imageFrame: imageFrame, imageSize: imageSize))
-            path.addLine(to: mapToView(end, imageFrame: imageFrame, imageSize: imageSize))
-            context.stroke(path, with: .color(color), style: strokeStyle)
-
-        case let .arrow(start, end):
-            drawArrow(annotation: annotation, start: start, end: end, context: context, imageFrame: imageFrame, imageSize: imageSize)
-
-        case let .rectangle(rect):
-            let r = mapRectToView(rect, imageFrame: imageFrame, imageSize: imageSize)
-            let path = Path(roundedRect: r, cornerRadius: 2)
-            if annotation.style.fill {
-                context.fill(path, with: .color(color.opacity(0.2)))
+            if viewModel.isCropping {
+                cropControls
+            } else {
+                StyleControls(viewModel: viewModel, tool: viewModel.styleTool)
             }
-            context.stroke(path, with: .color(color), style: strokeStyle)
 
-        case let .ellipse(rect):
-            let r = mapRectToView(rect, imageFrame: imageFrame, imageSize: imageSize)
-            let path = Path(ellipseIn: r)
-            if annotation.style.fill {
-                context.fill(path, with: .color(color.opacity(0.2)))
+            Spacer(minLength: 0)
+
+            HStack(spacing: 2) {
+                iconButton("arrow.uturn.backward", help: "Deshacer (⌘Z)", enabled: viewModel.canUndo, action: viewModel.undo)
+                iconButton("arrow.uturn.forward", help: "Rehacer (⇧⌘Z)", enabled: viewModel.canRedo, action: viewModel.redo)
             }
-            context.stroke(path, with: .color(color), style: strokeStyle)
+            .toolbarGroup()
+        }
+    }
 
-        case let .text(content, origin):
-            let viewPoint = mapToView(origin, imageFrame: imageFrame, imageSize: imageSize)
-            let resolved = context.resolve(Text(content).font(.system(size: max(annotation.style.lineWidth * 4, 14), weight: .semibold)).foregroundStyle(color))
-            context.draw(resolved, at: viewPoint, anchor: .topLeading)
+    private var cropControls: some View {
+        HStack(spacing: 6) {
+            Button("Restablecer", action: viewModel.resetCrop)
+                .buttonStyle(ActionButtonStyle(isPrimary: false))
+            Button("Cancelar", action: viewModel.cancelCrop)
+                .buttonStyle(ActionButtonStyle(isPrimary: false))
+            Button("Aplicar", action: viewModel.confirmCrop)
+                .buttonStyle(ActionButtonStyle())
+        }
+        .toolbarGroup()
+    }
 
-        case let .freehand(points):
-            guard let first = points.first else { return }
-            var path = Path()
-            path.move(to: mapToView(first, imageFrame: imageFrame, imageSize: imageSize))
-            for point in points.dropFirst() {
-                path.addLine(to: mapToView(point, imageFrame: imageFrame, imageSize: imageSize))
+    private func iconButton(_ systemName: String, help: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .medium))
+                .frame(width: 28, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(enabled ? .white : .white.opacity(0.25))
+        .disabled(!enabled)
+        .help(help)
+    }
+}
+
+private struct StyleControls: View {
+    @ObservedObject var viewModel: CaptureEditorViewModel
+    let tool: EditorTool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if tool.usesColor {
+                ColorSwatches(selection: $viewModel.strokeColor)
             }
-            context.stroke(path, with: .color(color), style: strokeStyle)
-        }
-    }
 
-    private func editorGesture(imageFrame: CGRect, imageSize: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onChanged { value in
-                handleDragChanged(value: value, imageFrame: imageFrame, imageSize: imageSize)
+            if tool.usesStrokeWidth {
+                compactSlider(icon: "lineweight", value: $viewModel.lineWidth, range: 1 ... 16, help: "Grosor")
             }
-            .onEnded { _ in
-                commitDrag()
+
+            if tool == .rectangle || tool == .ellipse {
+                ToolButton(icon: viewModel.fillShapes ? "square.fill" : "square", isSelected: viewModel.fillShapes) {
+                    viewModel.fillShapes.toggle()
+                }
+                .help("Relleno")
             }
-    }
 
-    private func handleDragChanged(value: DragGesture.Value, imageFrame: CGRect, imageSize: CGSize) {
-        guard imageFrame.contains(value.location) else { return }
+            if tool == .text {
+                compactSlider(icon: "textformat.size", value: $viewModel.fontSize, range: 12 ... 120, help: "Tamaño de texto")
+                ToolButton(icon: "character.textbox", isSelected: viewModel.textBackground) {
+                    viewModel.textBackground.toggle()
+                }
+                .help("Texto con fondo")
+            }
 
-        let imagePoint = mapToImage(value.location, imageFrame: imageFrame, imageSize: imageSize)
+            if tool == .obfuscate {
+                Picker("", selection: $viewModel.obfuscation) {
+                    ForEach(ObfuscationMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 180)
+            }
 
-        if dragStart == nil {
-            dragStart = imagePoint
-            if viewModel.activeTool == .pencil {
-                freehandPoints = [imagePoint]
+            if tool == .select, viewModel.selectedAnnotation == nil {
+                Text("Clic para seleccionar · Arrastra para mover · ⌫ para borrar")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
             }
         }
+        .toolbarGroup()
+        .fixedSize()
+    }
 
-        dragCurrent = imagePoint
-
-        if viewModel.activeTool == .pencil {
-            freehandPoints.append(imagePoint)
+    private func compactSlider(icon: String, value: Binding<CGFloat>, range: ClosedRange<CGFloat>, help: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            Slider(value: value, in: range)
+                .controlSize(.small)
+                .frame(width: 80)
         }
+        .help(help)
     }
+}
 
-    private func commitDrag() {
-        guard let start = dragStart else { return resetDrag() }
-        let end = dragCurrent ?? start
+private struct ColorSwatches: View {
+    @Binding var selection: Color
 
-        if let annotation = annotationForDrag(start: start, end: end) {
-            viewModel.add(annotation)
-        }
-        resetDrag()
-    }
-
-    private func annotationForDrag(start: CGPoint, end: CGPoint) -> EditorAnnotation.Kind? {
-        switch viewModel.activeTool {
-        case .line:
-            return start != end ? .line(start: start, end: end) : nil
-        case .arrow:
-            return start != end ? .arrow(start: start, end: end) : nil
-        case .rectangle:
-            let rect = CGRect(x: min(start.x, end.x), y: min(start.y, end.y), width: abs(end.x - start.x), height: abs(end.y - start.y))
-            return rect.width > 1 && rect.height > 1 ? .rectangle(rect) : nil
-        case .ellipse:
-            let rect = CGRect(x: min(start.x, end.x), y: min(start.y, end.y), width: abs(end.x - start.x), height: abs(end.y - start.y))
-            return rect.width > 1 && rect.height > 1 ? .ellipse(rect) : nil
-        case .text:
-            return .text(content: viewModel.textDraft.isEmpty ? "Texto" : viewModel.textDraft, origin: end)
-        case .pencil:
-            return freehandPoints.count > 1 ? .freehand(points: freehandPoints) : nil
-        }
-    }
-
-    private func resetDrag() {
-        dragStart = nil
-        dragCurrent = nil
-        freehandPoints = []
-    }
-
-    private func previewAnnotation() -> EditorAnnotation? {
-        guard let start = dragStart, let end = dragCurrent else { return nil }
-
-        switch viewModel.activeTool {
-        case .line:
-            return EditorAnnotation(kind: .line(start: start, end: end), style: currentStyle)
-        case .arrow:
-            return EditorAnnotation(kind: .arrow(start: start, end: end), style: currentStyle)
-        case .rectangle:
-            let rect = CGRect(x: min(start.x, end.x), y: min(start.y, end.y), width: abs(end.x - start.x), height: abs(end.y - start.y))
-            return EditorAnnotation(kind: .rectangle(rect), style: currentStyle)
-        case .ellipse:
-            let rect = CGRect(x: min(start.x, end.x), y: min(start.y, end.y), width: abs(end.x - start.x), height: abs(end.y - start.y))
-            return EditorAnnotation(kind: .ellipse(rect), style: currentStyle)
-        case .text:
-            return EditorAnnotation(kind: .text(content: viewModel.textDraft.isEmpty ? "Texto" : viewModel.textDraft, origin: end), style: currentStyle)
-        case .pencil:
-            if freehandPoints.count > 1 {
-                return EditorAnnotation(kind: .freehand(points: freehandPoints), style: currentStyle)
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(Array(CaptureEditorViewModel.palette.enumerated()), id: \.offset) { _, color in
+                Button {
+                    selection = color
+                } label: {
+                    Circle()
+                        .fill(color)
+                        .frame(width: 16, height: 16)
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1))
+                        .overlay(
+                            Circle()
+                                .strokeBorder(Color.white, lineWidth: 2)
+                                .padding(-3)
+                                .opacity(selection == color ? 1 : 0)
+                        )
+                }
+                .buttonStyle(.plain)
             }
-            return nil
+
+            ColorPicker("", selection: $selection, supportsOpacity: false)
+                .labelsHidden()
+                .frame(width: 22)
+                .help("Otro color")
         }
+        .padding(.horizontal, 2)
+    }
+}
+
+// MARK: - Background inspector
+
+private struct BackgroundInspector: View {
+    @ObservedObject var viewModel: CaptureEditorViewModel
+
+    private var background: BackgroundSettings {
+        viewModel.document.background
     }
 
-    private var currentStyle: AnnotationStyle {
-        AnnotationStyle(color: viewModel.strokeColor, lineWidth: viewModel.lineWidth, fill: viewModel.fillShapes)
-    }
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Toggle(isOn: Binding(
+                    get: { background.isEnabled },
+                    set: { value in viewModel.updateBackground { $0.isEnabled = value } }
+                )) {
+                    Text("Fondo")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .toggleStyle(.switch)
+                .controlSize(.small)
 
-    private func fittedRect(container: CGSize, content: CGSize) -> CGRect {
-        guard container.width > 0, container.height > 0, content.width > 0, content.height > 0 else {
-            return .zero
+                VStack(alignment: .leading, spacing: 8) {
+                    sectionTitle("Estilo")
+                    LazyVGrid(columns: Array(repeating: GridItem(.fixed(48), spacing: 8), count: 4), spacing: 8) {
+                        ForEach(BackgroundPreset.all) { preset in
+                            Button {
+                                viewModel.updateBackground {
+                                    $0.presetIndex = preset.id
+                                    $0.isEnabled = true
+                                }
+                            } label: {
+                                RoundedRectangle(cornerRadius: 7)
+                                    .fill(LinearGradient(colors: preset.colors, startPoint: .topLeading, endPoint: .bottomTrailing))
+                                    .frame(width: 48, height: 34)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 7)
+                                            .strokeBorder(Color.white, lineWidth: 2)
+                                            .opacity(background.isEnabled && background.presetIndex == preset.id ? 1 : 0)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                slider("Margen", value: background.padding, range: 0 ... 200, key: "padding") { $0.padding = $1 }
+                slider("Esquinas", value: background.cornerRadius, range: 0 ... 40, key: "radius") { $0.cornerRadius = $1 }
+
+                Toggle("Sombra", isOn: Binding(
+                    get: { background.shadow },
+                    set: { value in viewModel.updateBackground { $0.shadow = value } }
+                ))
+                .toggleStyle(.switch)
+                .controlSize(.small)
+
+                Text("El fondo se aplica al copiar, guardar o arrastrar la captura.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(16)
+            .disabled(false)
         }
-
-        let scale = min(container.width / content.width, container.height / content.height)
-        let width = content.width * scale
-        let height = content.height * scale
-
-        return CGRect(
-            x: (container.width - width) / 2,
-            y: (container.height - height) / 2,
-            width: width,
-            height: height
-        )
+        .background(EditorColors.panelBackground)
     }
 
-    private func mapToImage(_ point: CGPoint, imageFrame: CGRect, imageSize: CGSize) -> CGPoint {
-        let xRatio = (point.x - imageFrame.minX) / max(imageFrame.width, 1)
-        let yRatio = (point.y - imageFrame.minY) / max(imageFrame.height, 1)
-        return CGPoint(x: xRatio * imageSize.width, y: yRatio * imageSize.height)
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.secondary)
     }
 
-    private func mapToView(_ point: CGPoint, imageFrame: CGRect, imageSize: CGSize) -> CGPoint {
-        CGPoint(
-            x: imageFrame.minX + (point.x / max(imageSize.width, 1)) * imageFrame.width,
-            y: imageFrame.minY + (point.y / max(imageSize.height, 1)) * imageFrame.height
-        )
-    }
-
-    private func mapRectToView(_ rect: CGRect, imageFrame: CGRect, imageSize: CGSize) -> CGRect {
-        let origin = mapToView(rect.origin, imageFrame: imageFrame, imageSize: imageSize)
-        let size = CGSize(
-            width: (rect.width / max(imageSize.width, 1)) * imageFrame.width,
-            height: (rect.height / max(imageSize.height, 1)) * imageFrame.height
-        )
-        return CGRect(origin: origin, size: size)
-    }
-
-    // swiftlint:disable:next function_parameter_count
-    private func drawArrow(
-        annotation: EditorAnnotation,
-        start: CGPoint,
-        end: CGPoint,
-        context: GraphicsContext,
-        imageFrame: CGRect,
-        imageSize: CGSize
-    ) {
-        let s = mapToView(start, imageFrame: imageFrame, imageSize: imageSize)
-        let e = mapToView(end, imageFrame: imageFrame, imageSize: imageSize)
-        let color = annotation.style.color
-        let width = annotation.style.lineWidth
-        let strokeStyle = StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round)
-
-        var shaft = Path()
-        shaft.move(to: s)
-        shaft.addLine(to: e)
-        context.stroke(shaft, with: .color(color), style: strokeStyle)
-
-        let arrowHead = ArrowHead(from: s, to: e, lineWidth: width)
-
-        var head = Path()
-        head.move(to: arrowHead.tip)
-        head.addLine(to: arrowHead.left)
-        head.move(to: arrowHead.tip)
-        head.addLine(to: arrowHead.right)
-        context.stroke(head, with: .color(color), style: strokeStyle)
+    private func slider(
+        _ title: String,
+        value: CGFloat,
+        range: ClosedRange<CGFloat>,
+        key: String,
+        apply: @escaping (inout BackgroundSettings, CGFloat) -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                sectionTitle(title)
+                Spacer()
+                Text("\(Int(value))")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Slider(
+                value: Binding(
+                    get: { value },
+                    set: { newValue in
+                        viewModel.updateBackground(coalesceKey: key) {
+                            apply(&$0, newValue)
+                            $0.isEnabled = true
+                        }
+                    }
+                ),
+                in: range
+            )
+            .controlSize(.small)
+        }
     }
 }

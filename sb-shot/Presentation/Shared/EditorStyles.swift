@@ -3,8 +3,9 @@ import SwiftUI
 // MARK: - Design Tokens
 
 enum EditorColors {
-    static let canvasBackground = Color(red: 0.11, green: 0.11, blue: 0.12)
-    static let windowBackground = Color(red: 0.15, green: 0.15, blue: 0.16)
+    static let canvasBackground = Color(red: 0.09, green: 0.09, blue: 0.1)
+    static let windowBackground = Color(red: 0.14, green: 0.14, blue: 0.15)
+    static let panelBackground = Color(red: 0.12, green: 0.12, blue: 0.13)
     static let hoverFill = Color.white.opacity(0.08)
     static let pressedFill = Color.white.opacity(0.12)
     static let groupBorder = Color.white.opacity(0.1)
@@ -23,7 +24,7 @@ struct ToolButton: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 13, weight: .medium))
-                .frame(width: 30, height: 26)
+                .frame(width: 30, height: 28)
                 .background(backgroundColor, in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
         }
@@ -40,7 +41,7 @@ struct ToolButton: View {
         if isSelected {
             return .accentColor
         } else if isHovered {
-            return .white.opacity(0.08)
+            return EditorColors.hoverFill
         }
         return .clear
     }
@@ -50,62 +51,66 @@ struct ToolButton: View {
 
 struct ActionButtonStyle: ButtonStyle {
     var isPrimary: Bool = true
-
-    @State private var isHovered = false
+    var isActive: Bool = false
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 12, weight: .medium))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-            .background(backgroundColor(isPressed: configuration.isPressed), in: RoundedRectangle(cornerRadius: 6))
-            .foregroundStyle(isPrimary ? .white : .secondary)
-            .onHover { hovering in
-                withAnimation(.easeInOut(duration: 0.12)) {
-                    isHovered = hovering
-                }
-            }
+        ActionButtonBody(configuration: configuration, isPrimary: isPrimary, isActive: isActive)
     }
 
-    private func backgroundColor(isPressed: Bool) -> Color {
-        if isPrimary {
-            if isPressed {
-                return .accentColor.opacity(0.8)
-            } else if isHovered {
-                return .accentColor.opacity(0.9)
+    private struct ActionButtonBody: View {
+        let configuration: Configuration
+        let isPrimary: Bool
+        let isActive: Bool
+
+        @Environment(\.isEnabled) private var isEnabled
+        @State private var isHovered = false
+
+        var body: some View {
+            configuration.label
+                .font(.system(size: 12, weight: .medium))
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(backgroundColor, in: RoundedRectangle(cornerRadius: 7))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7)
+                        .strokeBorder(isPrimary ? Color.clear : EditorColors.groupBorder, lineWidth: 1)
+                )
+                .foregroundStyle(isPrimary || isActive ? .white : .secondary)
+                .opacity(isEnabled ? 1 : 0.4)
+                .contentShape(Rectangle())
+                .onHover { hovering in
+                    withAnimation(.easeInOut(duration: 0.12)) {
+                        isHovered = hovering
+                    }
+                }
+        }
+
+        private var backgroundColor: Color {
+            if isPrimary {
+                if configuration.isPressed {
+                    return .accentColor.opacity(0.8)
+                }
+                return isHovered ? .accentColor.opacity(0.9) : .accentColor
             }
-            return .accentColor
-        } else {
-            if isPressed {
-                return .white.opacity(0.12)
-            } else if isHovered {
-                return .white.opacity(0.08)
+            if isActive {
+                return .accentColor.opacity(0.35)
             }
-            return .clear
+            if configuration.isPressed {
+                return EditorColors.pressedFill
+            }
+            return isHovered ? EditorColors.hoverFill : .clear
         }
     }
 }
 
-// MARK: - PreviewToolButtonStyle
+// MARK: - WindowDragArea
 
-struct PreviewToolButtonStyle: ButtonStyle {
-    @State private var isHovered = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 12, weight: .medium))
-            .frame(width: 26, height: 26)
-            .background(
-                configuration.isPressed ? EditorColors.pressedFill :
-                    isHovered ? EditorColors.hoverFill : Color.clear,
-                in: RoundedRectangle(cornerRadius: 6)
-            )
-            .foregroundStyle(.secondary)
-            .onHover { hovering in
-                withAnimation(.easeInOut(duration: 0.12)) {
-                    isHovered = hovering
-                }
-            }
+/// Zona vacia que permite arrastrar ventanas cuyo contenido SwiftUI cubre la barra de titulo.
+struct WindowDragArea: View {
+    var body: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .gesture(WindowDragGesture())
     }
 }
 
@@ -114,10 +119,10 @@ struct PreviewToolButtonStyle: ButtonStyle {
 struct ToolbarGroupModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(EditorColors.groupBorder, lineWidth: 1))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 3)
+            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(EditorColors.groupBorder, lineWidth: 1))
     }
 }
 

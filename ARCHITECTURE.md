@@ -1,102 +1,100 @@
 # Arquitectura de sb-shot
 
-Herramienta de captura de pantalla para macOS con editor de anotaciones integrado.
+Herramienta de captura y grabacion de pantalla para macOS (alternativa a CleanShot X) con editor de anotaciones, editor de video, acceso rapido e historial.
+
+## Funcionalidades
+
+| Area | Que incluye |
+|---|---|
+| Captura | Area, area anterior, pantalla completa, ventana (con o sin sombra), temporizador (3/5/10 s), texto con OCR (Vision) |
+| Seleccion | Una ventana por pantalla, reticula, lupa con pixeles y color, medidas en vivo, Espacio para alternar area/ventana, mantener Espacio para mover, Shift para cuadrado, Enter para pantalla completa, pantalla congelada opcional |
+| Grabacion | Area, pantalla o ventana a MP4 (H.264) o GIF, 24/30/60 fps, cursor, resaltado de clics, audio del sistema, microfono, cuenta regresiva, barra de control (detener, reiniciar, descartar) |
+| Acceso rapido | Pila de miniaturas con Copiar, Guardar, Anotar, Fijar, arrastrar y soltar, deslizar para descartar, cierre automatico configurable |
+| Editor | Seleccionar/mover/redimensionar, flecha, linea, rectangulo, elipse, texto sobre el lienzo, contador numerado, lapiz, resaltador, pixelar/desenfocar, foco, recorte, fondo con degradado/margen/esquinas/sombra, deshacer, atajos de teclado |
+| Video | Recortar (AVKit), quitar audio, exportar MP4 o GIF |
+| Otros | Capturas fijadas flotantes, historial, guardado automatico con carpeta elegible, PNG/JPEG, atajo global por accion, abrir al iniciar sesion |
 
 ## Stack Tecnologico
 
 | Tecnologia | Uso |
 |---|---|
-| Swift 6 | Lenguaje principal |
-| SwiftUI | Vistas declarativas (menus, settings, editor UI) |
-| AppKit | Window controllers, NSPanel, NSPasteboard |
-| ScreenCaptureKit | Captura de pantalla multi-monitor |
-| Carbon Events | Atajos de teclado globales |
-| CoreGraphics | Renderizado de anotaciones para exportacion |
+| Swift / SwiftUI | Vistas (menu, ajustes, editor, acceso rapido) |
+| AppKit | Ventanas, paneles flotantes, overlay de seleccion, arrastrar y soltar |
+| ScreenCaptureKit | Capturas (`SCScreenshotManager`) y grabacion (`SCStream` + `SCRecordingOutput`) |
+| AVFoundation / AVKit | Recorte, exportacion y miniaturas de video |
+| ImageIO | Exportacion a GIF |
+| CoreGraphics / CoreImage | Render de anotaciones, pixelado y desenfoque |
+| Vision | Reconocimiento de texto |
+| Carbon Events | Atajos globales |
+| ServiceManagement | Abrir al iniciar sesion |
 
 ## Estructura de Capas
-
-El proyecto sigue **Clean Architecture** con 4 capas bien definidas:
 
 ```
 ┌──────────────────────────────────────────┐
 │              App (Entry Point)           │
-│   SbShotApp · AppContainer · Settings    │
+│   SbShotApp · AppContainer · AppSettings │
 ├──────────────────────────────────────────┤
 │           Presentation (UI)              │
 │  ViewModels · WindowControllers · Views  │
 ├──────────────────────────────────────────┤
 │       Infrastructure (Servicios)         │
-│   Capture · Clipboard · Hotkey · Perms   │
+│ Capture · Recording · Selection · Files  │
 ├──────────────────────────────────────────┤
 │         Domain (Logica de negocio)       │
 │   Contracts · Models · Use Cases         │
 └──────────────────────────────────────────┘
 ```
 
-### Diagrama de Capas
-
 ```mermaid
 graph TB
     subgraph App["App Layer"]
-        SbShotApp["SbShotApp<br/><small>@main entry point</small>"]
-        AppContainer["AppContainer<br/><small>Dependency Injection</small>"]
-        ShortcutStore["ShortcutSettingsStore<br/><small>UserDefaults persistence</small>"]
+        SbShotApp["SbShotApp<br/><small>MenuBarExtra + Settings</small>"]
+        AppContainer["AppContainer<br/><small>DI + atajos</small>"]
+        Settings["AppSettings<br/><small>UserDefaults</small>"]
     end
 
     subgraph Presentation["Presentation Layer"]
-        FlowVM["CaptureFlowViewModel<br/><small>Orquestador del flujo</small>"]
-        EditorVM["CaptureEditorViewModel<br/><small>Estado del editor</small>"]
-        PreviewWC["CapturePreviewWindowController"]
-        EditorWC["CaptureEditorWindowController"]
-        ThumbnailC["CaptureThumbnailController"]
-        MenuBar["MenuBarView"]
-        SettingsV["SettingsView"]
+        FlowVM["CaptureFlowViewModel"]
+        RecVM["RecordingViewModel"]
+        Output["CaptureOutputHandler"]
+        EditorVM["CaptureEditorViewModel"]
+        QuickAccess["QuickAccessController"]
+        Windows["Editor · VideoEditor · History · Pin · Toast"]
     end
 
     subgraph Infrastructure["Infrastructure Layer"]
-        ScreenCapture["ScreenCaptureService"]
-        Clipboard["ClipboardService"]
-        Permission["PermissionService"]
-        Hotkey["HotkeyManager"]
+        Capture["ScreenCaptureService"]
+        Recorder["ScreenRecordingService"]
         Selection["SelectionOverlayController"]
         Renderer["AnnotationRenderer"]
-        Adapters["SystemAdapters<br/><small>Presenter implementations</small>"]
+        Files["FileStorage · HistoryStore"]
+        Hotkey["HotkeyManager"]
     end
 
     subgraph Domain["Domain Layer"]
-        UseCase["CaptureRegionUseCase"]
-        Contracts["Protocols<br/><small>ScreenCaptureProviding<br/>ScreenPermissionChecking<br/>ClipboardWriting<br/>RegionSelecting</small>"]
-        Models["EditorModels<br/><small>EditorTool, AnnotationStyle<br/>EditorAnnotation</small>"]
+        UseCase["CaptureScreenshotUseCase"]
+        Contracts["Protocolos"]
+        Models["CaptureModels · EditorModels"]
     end
 
     SbShotApp --> AppContainer
     AppContainer --> FlowVM
-    AppContainer --> ShortcutStore
+    AppContainer --> RecVM
     AppContainer --> Hotkey
-
     FlowVM --> UseCase
-    FlowVM --> Adapters
+    RecVM --> UseCase
+    RecVM --> Recorder
+    FlowVM --> Output
+    RecVM --> Output
+    Output --> QuickAccess
+    Output --> Windows
+    Output --> Files
     EditorVM --> Renderer
-
-    Adapters --> PreviewWC
-    Adapters --> EditorWC
-    Adapters --> ThumbnailC
-    Adapters --> Selection
-
     UseCase --> Contracts
-
-    ScreenCapture -.->|implements| Contracts
-    Clipboard -.->|implements| Contracts
-    Permission -.->|implements| Contracts
+    Capture -.->|implements| Contracts
+    Recorder -.->|implements| Contracts
     Selection -.->|implements| Contracts
-
-    MenuBar --> FlowVM
-    SettingsV --> ShortcutStore
-
-    style Domain fill:#e8f5e9
-    style Infrastructure fill:#e3f2fd
-    style Presentation fill:#fff3e0
-    style App fill:#fce4ec
 ```
 
 ## Flujo de Captura
@@ -104,309 +102,142 @@ graph TB
 ```mermaid
 sequenceDiagram
     actor User
-    participant MenuBar
     participant FlowVM as CaptureFlowViewModel
-    participant UseCase as CaptureRegionUseCase
-    participant Perms as PermissionService
-    participant Selection as SelectionOverlay
+    participant UseCase as CaptureScreenshotUseCase
+    participant Selector as SelectionOverlayRegionSelector
     participant Capture as ScreenCaptureService
-    participant Clipboard as ClipboardService
-    participant Thumbnail as ThumbnailController
+    participant Output as CaptureOutputHandler
 
-    User->>MenuBar: Click "Capturar region"
-    MenuBar->>FlowVM: captureRegion()
-    FlowVM->>UseCase: execute()
-
-    UseCase->>Perms: hasScreenRecordingAccess()
-    alt Sin permiso
-        Perms-->>UseCase: false
-        UseCase->>Perms: requestScreenRecordingAccess()
-        Perms-->>UseCase: false
-        UseCase->>Perms: openScreenRecordingSettings()
-        UseCase-->>FlowVM: .permissionDenied
+    User->>FlowVM: Atajo o menu (area, ventana, pantalla...)
+    FlowVM->>UseCase: execute(mode)
+    UseCase->>UseCase: ensurePermission()
+    UseCase->>Selector: select(options)
+    Note over Selector: Snapshots de cada pantalla<br/>para la lupa y el modo congelado
+    Selector-->>UseCase: SelectionResult
+    alt Pantalla congelada
+        UseCase-->>FlowVM: imagen recortada del snapshot
+    else
+        UseCase->>Capture: capture(selection)
+        Capture-->>UseCase: NSImage (resolucion nativa)
     end
-
-    UseCase->>Selection: selectRegion()
-    Note over Selection: Overlay fullscreen<br/>con cursor crosshair
-    User->>Selection: Drag para seleccionar region
-    Selection-->>UseCase: CGRect (region)
-
-    UseCase->>Capture: captureRegion(rect)
-    Note over Capture: ScreenCaptureKit<br/>Multi-display support
-    Capture-->>UseCase: NSImage
-
-    UseCase->>Clipboard: copy(image)
-    UseCase-->>FlowVM: .captured(image)
-
-    FlowVM->>Thumbnail: show(image)
-    Note over Thumbnail: Auto-cierre 5s<br/>Hover muestra acciones
+    FlowVM->>Output: handleScreenshot(image)
+    Note over Output: Copiar · guardar · historial<br/>acceso rapido o editor
 ```
 
-## Flujo del Editor
+## Flujo de Grabacion
 
 ```mermaid
 sequenceDiagram
     actor User
-    participant Thumbnail as ThumbnailController
-    participant FlowVM as CaptureFlowViewModel
-    participant EditorWC as EditorWindowController
-    participant EditorVM as EditorViewModel
-    participant Renderer as AnnotationRenderer
-    participant Clipboard as ClipboardService
+    participant RecVM as RecordingViewModel
+    participant Selector as RegionSelecting
+    participant Countdown as CountdownController
+    participant Controls as RecordingControlsController
+    participant Recorder as ScreenRecordingService
+    participant Output as CaptureOutputHandler
 
-    User->>Thumbnail: Click "Editar"
-    Thumbnail->>FlowVM: onEdit()
-    FlowVM->>EditorWC: show(image, onCopy)
-
-    loop Anotaciones
-        User->>EditorWC: Seleccionar herramienta + Dibujar
-        EditorWC->>EditorVM: add(annotation)
-        EditorVM->>EditorVM: pushUndoSnapshot()
-    end
-
-    alt Copiar
-        User->>EditorWC: Click "Copiar"
-        EditorWC->>EditorVM: renderedImage()
-        EditorVM->>Renderer: render(base, annotations)
-        Renderer-->>EditorVM: NSImage final
-        EditorWC->>FlowVM: onCopy(editedImage)
-        FlowVM->>Clipboard: copy(image)
-    end
-
-    alt Guardar PNG
-        User->>EditorWC: Click "Guardar PNG"
-        EditorWC->>EditorVM: renderedImage()
-        Note over EditorWC: NSSavePanel
-    end
+    User->>RecVM: toggle(fullscreen:)
+    RecVM->>Selector: select(purpose: .recording)
+    RecVM->>Countdown: countdown(3 s)
+    RecVM->>Controls: show(borde + barra)
+    RecVM->>Recorder: start(selection, options)
+    Note over Recorder: SCStream + SCRecordingOutput<br/>excluye las ventanas de la app
+    User->>RecVM: Detener (barra, menu o mismo atajo)
+    RecVM->>Recorder: stop()
+    Recorder-->>RecVM: URL del MP4
+    RecVM->>Output: handleRecording(url)
+    Note over Output: Convierte a GIF si corresponde<br/>y muestra el acceso rapido
 ```
 
-## Inyeccion de Dependencias
+## Editor
 
-```mermaid
-graph LR
-    subgraph AppContainer
-        direction TB
-        AC["AppContainer"]
+El editor guarda un `EditorDocument` (anotaciones, recorte y fondo). Deshacer/rehacer guarda copias completas del documento (maximo 100) y agrupa los cambios seguidos de un mismo slider.
 
-        AC -->|creates| PS[PermissionService]
-        AC -->|creates| CS[ClipboardService]
-        AC -->|creates| SCS[ScreenCaptureService]
-        AC -->|creates| SOC[SelectionOverlayRegionSelector]
-        AC -->|creates| HM[HotkeyManager]
-        AC -->|creates| PWP[PreviewWindowPresenter]
-        AC -->|creates| EWP[EditorWindowPresenter]
-        AC -->|creates| TWP[ThumbnailWindowPresenter]
+`AnnotationRenderer` dibuja el documento con CoreGraphics en un contexto con el eje Y hacia abajo. Lo usan:
 
-        AC -->|assembles| UC[CaptureRegionUseCase]
-        UC -.->|uses| PS
-        UC -.->|uses| CS
-        UC -.->|uses| SCS
-        UC -.->|uses| SOC
+- `EditorCanvasView` (dentro de `Canvas.withCGContext`, con una imagen base reducida para ir fluido)
+- La exportacion (`render(document:sources:)`, a resolucion completa)
 
-        AC -->|assembles| VM[CaptureFlowViewModel]
-        VM -.->|uses| UC
-        VM -.->|uses| PWP
-        VM -.->|uses| EWP
-        VM -.->|uses| TWP
-        VM -.->|uses| CS
-    end
-```
-
-## Protocolos (Contracts)
-
-Todos los servicios implementan protocolos definidos en el dominio, permitiendo testabilidad y desacoplamiento:
-
-```mermaid
-classDiagram
-    class ScreenCaptureProviding {
-        <<protocol>>
-        +captureRegion(CGRect) async throws NSImage
-    }
-
-    class ScreenPermissionChecking {
-        <<protocol>>
-        +hasScreenRecordingAccess() Bool
-        +requestScreenRecordingAccess() Bool
-        +openScreenRecordingSettings()
-    }
-
-    class ClipboardWriting {
-        <<protocol>>
-        +copy(image: NSImage)
-    }
-
-    class RegionSelecting {
-        <<protocol>>
-        +selectRegion() async CGRect?
-    }
-
-    class PreviewPresenting {
-        <<protocol>>
-        +show(image, onCopy, onEdit)
-    }
-
-    class ThumbnailPresenting {
-        <<protocol>>
-        +show(image, onOpen, onEdit, onCopy)
-    }
-
-    class EditorPresenting {
-        <<protocol>>
-        +show(image, onCopy)
-    }
-
-    ScreenCaptureService ..|> ScreenCaptureProviding
-    PermissionService ..|> ScreenPermissionChecking
-    ClipboardService ..|> ClipboardWriting
-    SelectionOverlayRegionSelector ..|> RegionSelecting
-    PreviewWindowPresenter ..|> PreviewPresenting
-    ThumbnailWindowPresenter ..|> ThumbnailPresenting
-    EditorWindowPresenter ..|> EditorPresenting
-```
-
-## Modelo de Anotaciones
-
-```mermaid
-classDiagram
-    class EditorAnnotation {
-        +id: UUID
-        +kind: Kind
-        +style: AnnotationStyle
-    }
-
-    class Kind {
-        <<enum>>
-        line(start, end)
-        arrow(start, end)
-        rectangle(CGRect)
-        ellipse(CGRect)
-        text(content, origin)
-        freehand(points)
-    }
-
-    class AnnotationStyle {
-        +color: Color
-        +lineWidth: CGFloat
-        +fill: Bool
-    }
-
-    class EditorTool {
-        <<enum>>
-        line
-        arrow
-        rectangle
-        ellipse
-        text
-        pencil
-    }
-
-    EditorAnnotation --> Kind
-    EditorAnnotation --> AnnotationStyle
-    EditorTool ..> Kind : maps to
-```
+Asi lo que se ve en el lienzo coincide con la imagen copiada o guardada. `RenderLayout` traduce entre coordenadas de la imagen y del lienzo de salida (recorte + margen del fondo).
 
 ## Estructura de Archivos
 
 ```
 sb-shot/
 ├── App/
-│   ├── SbShotApp.swift              # @main, MenuBarExtra, Settings scene
-│   ├── AppContainer.swift           # DI container, wiring de dependencias
-│   └── ShortcutSettingsStore.swift   # Persistencia del atajo global
-│
+│   ├── SbShotApp.swift              # MenuBarExtra (estilo menu) + Settings
+│   ├── AppContainer.swift           # DI, enrutado de acciones y atajos
+│   └── AppSettings.swift            # Preferencias y atajos por accion
 ├── Domain/
-│   ├── CaptureContracts.swift       # 4 protocolos del dominio
-│   ├── EditorModels.swift           # EditorTool, AnnotationStyle, EditorAnnotation
-│   └── CaptureRegionUseCase.swift   # Logica: permisos → seleccion → captura → clipboard
-│
+│   ├── CaptureContracts.swift       # Protocolos del dominio
+│   ├── CaptureModels.swift          # Acciones, selecciones, opciones, CaptureItem
+│   ├── CaptureScreenshotUseCase.swift
+│   └── EditorModels.swift           # Herramientas, anotaciones, documento, fondo
 ├── Infrastructure/
-│   ├── Capture/
-│   │   └── ScreenCaptureService.swift      # ScreenCaptureKit, multi-display
-│   ├── Clipboard/
-│   │   └── ClipboardService.swift          # NSPasteboard wrapper
-│   ├── Hotkey/
-│   │   └── HotkeyManager.swift             # Carbon Events, registro de hotkeys
-│   ├── Permissions/
-│   │   └── PermissionService.swift         # CGPreflightScreenCaptureAccess
-│   ├── Rendering/
-│   │   ├── AnnotationRenderer.swift        # CoreGraphics rendering a NSImage
-│   │   ├── ArrowGeometry.swift             # Calculo geometrico compartido de flechas
-│   │   └── ImageExporter.swift             # Exportacion PNG via NSSavePanel
-│   ├── Selection/
-│   │   └── SelectionOverlayController.swift # Overlay fullscreen + drag selection
-│   └── SystemAdapters.swift                # Implementaciones de Presenter protocols
-│
+│   ├── Capture/ScreenCaptureService.swift
+│   ├── Recording/                   # ScreenRecordingService, VideoProcessing (GIF/MP4), ClickHighlighter
+│   ├── Selection/SelectionOverlayController.swift
+│   ├── Rendering/                   # AnnotationRenderer, RenderSources, AnnotationGeometry, ArrowGeometry
+│   ├── Files/FileStorage.swift      # Temporales, carpeta de guardado (bookmark), codificacion
+│   ├── History/HistoryStore.swift
+│   ├── Clipboard/ClipboardService.swift
+│   ├── Hotkey/HotkeyManager.swift
+│   ├── Permissions/PermissionService.swift
+│   ├── System/SystemServices.swift  # Sonido, inicio de sesion, OCR
+│   └── SystemAdapters.swift         # Selector y presentadores de ventanas
 └── Presentation/
-    ├── CapturePresenting.swift             # Protocolos de presentacion
-    ├── Capture/
-    │   └── CaptureFlowViewModel.swift      # Orquestador principal del flujo
-    ├── Editor/
-    │   ├── CaptureEditorViewModel.swift    # Estado del editor, undo/redo
-    │   └── CaptureEditorWindowController.swift # Ventana del editor + canvas
-    ├── MenuBar/
-    │   └── MenuBarView.swift               # Menu de la barra de estado
-    ├── Preview/
-    │   └── CapturePreviewWindowController.swift # Ventana de vista previa
-    ├── Settings/
-    │   └── SettingsView.swift              # Configuracion del atajo global
-    └── Thumbnail/
-        └── CaptureThumbnailController.swift # Thumbnail flotante post-captura
+    ├── CapturePresenting.swift      # Protocolos y acciones de presentacion
+    ├── Capture/                     # CaptureFlowViewModel, CaptureOutputHandler
+    ├── Recording/                   # RecordingViewModel, barra de control, cuenta regresiva
+    ├── Editor/                      # ViewModel, lienzo, ventana, barra de herramientas
+    ├── VideoEditor/                 # Recorte y exportacion de video
+    ├── QuickAccess/                 # Miniaturas flotantes apiladas
+    ├── Pin/                         # Capturas fijadas
+    ├── History/                     # Ventana de historial
+    ├── Toast/                       # Avisos breves
+    ├── MenuBar/MenuBarView.swift
+    ├── Settings/SettingsView.swift  # General, Captura, Grabacion, Acceso rapido, Atajos
+    └── Shared/                      # Estilos, formato de atajos, FileDragSource
 ```
 
-## Patrones Utilizados
+## Sandbox y Permisos
 
-| Patron | Donde | Proposito |
-|---|---|---|
-| Clean Architecture | Todo el proyecto | Separacion de capas |
-| Use Case | `CaptureRegionUseCase` | Orquestar logica de negocio |
-| Protocol-Based Design | `CaptureContracts`, `CapturePresenting` | Desacoplamiento, testabilidad |
-| Dependency Injection | `AppContainer` | Composicion de dependencias |
-| Observable/MVVM | `CaptureFlowViewModel`, `CaptureEditorViewModel` | State management reactivo |
-| Presenter | `SystemAdapters` | Gestionar ciclo de vida de ventanas |
-| Undo/Redo Stack | `CaptureEditorViewModel` | Historial de edicion (max 100) |
+| Permiso | Para que |
+|---|---|
+| Grabacion de pantalla (TCC) | Capturas y grabaciones |
+| Microfono (`device.audio-input`) | Grabar voz |
+| Imagenes (`assets.pictures.read-write`) | Carpeta por defecto `~/Pictures/sb-shot` |
+| Archivos elegidos (`files.user-selected.read-write`) | Guardar como, carpeta personalizada |
+| Bookmarks (`files.bookmarks.app-scope`) | Recordar la carpeta personalizada |
 
 ## Como Contribuir
 
 ### Prerequisitos
 
-- macOS 14+ (Sonoma)
-- Xcode 16+
-- Swift 6
+- macOS 15+
+- Xcode 26+
 
 ### Herramientas de Calidad
 
 ```bash
-# Formatear codigo
 swiftformat sb-shot/ sb-shotTests/ sb-shotUITests/
-
-# Lint
 swiftlint lint
+xcodebuild test -scheme SbShot -only-testing:SbShotTests
 
-# Lint con auto-correccion
-swiftlint lint --fix
+# Pruebas reales de captura y grabacion (pantalla desbloqueada y permiso concedido)
+TEST_RUNNER_SBSHOT_INTEGRATION=1 xcodebuild test -scheme SbShot -only-testing:SbShotTests/RecordingIntegrationTests
 ```
-
-### Agregar un Nuevo Servicio
-
-1. Definir el protocolo en `Domain/CaptureContracts.swift`
-2. Implementar en `Infrastructure/NuevoServicio/`
-3. Agregar conformance con extension: `extension MiServicio: MiProtocolo {}`
-4. Registrar en `AppContainer`
 
 ### Agregar una Nueva Herramienta de Editor
 
-1. Agregar caso a `EditorTool` en `Domain/EditorModels.swift`
-2. Agregar caso a `EditorAnnotation.Kind`
-3. Implementar rendering en `AnnotationRenderer` (para export PNG)
-4. Implementar rendering en `CaptureEditorCanvasView` (para preview en canvas)
-5. Agregar gesture handling en `editorGesture` / `commitDrag` / `annotationForDrag`
-6. Agregar preview en `previewAnnotation()`
+1. Agregar caso a `EditorTool` (icono, titulo y tecla) y a `EditorAnnotation.Kind`
+2. Implementar geometria (`bounds`, `hitTest`, `translated`, `handles`) en `AnnotationGeometry`
+3. Dibujarla en `AnnotationRenderer` (sirve para el lienzo y la exportacion)
+4. Crearla desde el arrastre en `CaptureEditorViewModel.annotation(start:end:points:)`
 
 ### Convenciones
 
-- **Idioma del codigo**: Ingles para identificadores, espanol para strings de UI
-- **Formato**: SwiftFormat con `.swiftformat` del proyecto
-- **Lint**: SwiftLint con `.swiftlint.yml` del proyecto
-- **Arquitectura**: Respetar la separacion de capas (Domain no importa frameworks)
-- **Window Controllers**: Usar patron `init → super.init → show()` existente
-- **Protocolos**: Implementar conformance como extension separada
+- **Idioma del codigo**: ingles para identificadores, espanol para textos de la interfaz
+- **Formato**: SwiftFormat con `.swiftformat`; **Lint**: SwiftLint con `.swiftlint.yml`
+- **Arquitectura**: respetar la separacion de capas; servicios detras de protocolos del dominio
+- **Ventanas de la app**: excluidas de capturas y grabaciones (salvo el resaltado de clics)

@@ -14,12 +14,15 @@ struct SbShotApp: App {
     private let container = AppContainer()
 
     var body: some Scene {
-        MenuBarExtra("sb-shot", systemImage: "camera.viewfinder") {
-            MenuBarView(viewModel: container.captureViewModel)
+        MenuBarExtra {
+            MenuBarView(container: container, recording: container.recordingViewModel, settings: container.settings)
+        } label: {
+            MenuBarLabel(recording: container.recordingViewModel)
         }
+        .menuBarExtraStyle(.menu)
 
         Settings {
-            SettingsView(settingsStore: container.shortcutSettingsStore)
+            SettingsView(settings: container.settings, fileStorage: container.fileStorage, history: container.history)
         }
     }
 }

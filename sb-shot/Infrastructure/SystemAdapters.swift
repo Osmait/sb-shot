@@ -2,79 +2,67 @@ import AppKit
 
 @MainActor
 final class SelectionOverlayRegionSelector: RegionSelecting {
+    private let capturer: ScreenCaptureProviding
     private var activeController: SelectionOverlayController?
 
-    func selectRegion() async -> CGRect? {
-        await withCheckedContinuation { continuation in
+    init(capturer: ScreenCaptureProviding) {
+        self.capturer = capturer
+    }
+
+    func select(options: SelectionOptions) async -> SelectionResult? {
+        guard activeController == nil else { return nil }
+
+        let needsSnapshots = options.freezeScreen || options.showsMagnifier
+        let snapshots = await needsSnapshots ? ((try? capturer.displaySnapshots()) ?? [:]) : [:]
+
+        var effectiveOptions = options
+        if snapshots.isEmpty {
+            effectiveOptions.freezeScreen = false
+        }
+
+        return await withCheckedContinuation { continuation in
             let controller = SelectionOverlayController()
             activeController = controller
-            controller.beginSelection { rect in
+            controller.beginSelection(options: effectiveOptions, snapshots: snapshots) { result in
                 self.activeController = nil
-                continuation.resume(returning: rect)
+                continuation.resume(returning: result)
             }
         }
     }
-}
 
-@MainActor
-final class PreviewWindowPresenter: PreviewPresenting {
-    private var controller: CapturePreviewWindowController?
-
-    func show(image: NSImage, onCopy: @escaping () -> Void, onEdit: @escaping () -> Void) {
-        controller?.close()
-
-        let preview = CapturePreviewWindowController(
-            image: image,
-            onCopy: onCopy,
-            onEdit: onEdit,
-            onClose: { [weak self] in
-                self?.controller = nil
-            }
-        )
-
-        controller = preview
-        preview.show()
-    }
-}
-
-@MainActor
-final class ThumbnailWindowPresenter: ThumbnailPresenting {
-    private var controller: CaptureThumbnailController?
-
-    func show(image: NSImage, onOpen: @escaping () -> Void, onEdit: @escaping () -> Void, onCopy: @escaping () -> Void) {
-        controller?.close()
-
-        let thumbnail = CaptureThumbnailController(
-            image: image,
-            onOpen: onOpen,
-            onEdit: onEdit,
-            onCopy: onCopy,
-            onClose: { [weak self] in
-                self?.controller = nil
-            }
-        )
-
-        controller = thumbnail
-        thumbnail.show()
+    func displayUnderCursor() -> ScreenSelection? {
+        guard
+            let screen = ScreenGeometry.screenUnderCursor,
+            let displayID = ScreenGeometry.displayID(of: screen)
+        else { return nil }
+        return .display(id: displayID, frame: screen.frame)
     }
 }
 
 @MainActor
 final class EditorWindowPresenter: EditorPresenting {
-    private var controller: CaptureEditorWindowController?
+    private var controllers: [CaptureEditorWindowController] = []
 
-    func show(image: NSImage, onCopy: @escaping (NSImage) -> Void) {
-        controller?.close()
+    func show(image: NSImage, actions: EditorActions) {
+        let editor = CaptureEditorWindowController(image: image, actions: actions)
+        editor.onClose = { [weak self, weak editor] in
+            self?.controllers.removeAll { $0 === editor }
+        }
+        controllers.append(editor)
+        editor.show()
+    }
+}
 
-        let editor = CaptureEditorWindowController(
-            image: image,
-            onCopy: onCopy,
-            onClose: { [weak self] in
-                self?.controller = nil
-            }
-        )
+@MainActor
+final class VideoEditorWindowPresenter: VideoEditorPresenting {
+    private var controllers: [VideoEditorWindowController] = []
 
-        controller = editor
+    func show(videoURL: URL, actions: VideoEditorActions) {
+        let editor = VideoEditorWindowController(videoURL: videoURL, actions: actions)
+        editor.onClose = { [weak self, weak editor] in
+            self?.controllers.removeAll { $0 === editor }
+        }
+        controllers.append(editor)
         editor.show()
     }
 }

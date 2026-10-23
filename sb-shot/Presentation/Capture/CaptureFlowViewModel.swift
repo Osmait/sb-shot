@@ -1,113 +1,104 @@
 import AppKit
 import Combine
+import UniformTypeIdentifiers
 
 @MainActor
 final class CaptureFlowViewModel: ObservableObject {
     @Published private(set) var isCapturing = false
-    @Published var statusMessage: String?
 
-    private var statusTask: Task<Void, Never>?
-
-    private let useCase: CaptureRegionUseCase
-    private let thumbnailPresenter: ThumbnailPresenting
-    private let previewPresenter: PreviewPresenting
-    private let editorPresenter: EditorPresenting
-    private let clipboard: ClipboardWriting
+    private let useCase: CaptureScreenshotUseCase
+    private let settings: AppSettings
+    private let output: CaptureOutputHandler
+    private let textRecognizer: TextRecognizing
+    private let toast: ToastPresenting
 
     init(
-        useCase: CaptureRegionUseCase,
-        thumbnailPresenter: ThumbnailPresenting,
-        previewPresenter: PreviewPresenting,
-        editorPresenter: EditorPresenting,
-        clipboard: ClipboardWriting
+        useCase: CaptureScreenshotUseCase,
+        settings: AppSettings,
+        output: CaptureOutputHandler,
+        textRecognizer: TextRecognizing,
+        toast: ToastPresenting
     ) {
         self.useCase = useCase
-        self.thumbnailPresenter = thumbnailPresenter
-        self.previewPresenter = previewPresenter
-        self.editorPresenter = editorPresenter
-        self.clipboard = clipboard
+        self.settings = settings
+        self.output = output
+        self.textRecognizer = textRecognizer
+        self.toast = toast
     }
 
-    func captureRegion() {
+    var hasPreviousArea: Bool {
+        settings.lastCaptureArea != nil
+    }
+
+    func capture(_ mode: ScreenshotMode) {
         guard !isCapturing else { return }
-
         isCapturing = true
-        setStatus(nil)
 
-        Task { [weak self] in
-            guard let self else { return }
-            let outcome = await useCase.execute()
+        Task {
+            defer { isCapturing = false }
 
-            await MainActor.run {
-                self.handleOutcome(outcome)
+            let outcome = await useCase.execute(
+                mode: mode,
+                previousArea: settings.lastCaptureArea,
+                selectionOptions: settings.selectionOptions,
+                captureOptions: settings.captureOptions
+            )
+            handle(outcome)
+        }
+    }
+
+    func captureText() {
+        guard !isCapturing else { return }
+        isCapturing = true
+
+        Task {
+            defer { isCapturing = false }
+
+            var options = settings.selectionOptions
+            options.purpose = .text
+            options.allowsWindowMode = true
+
+            let outcome = await useCase.execute(mode: .area, selectionOptions: options, captureOptions: CaptureOptions())
+            guard case let .captured(image, _) = outcome else {
+                handle(outcome)
+                return
+            }
+
+            toast.showProgress("Reconociendo texto…")
+            do {
+                let text = try await textRecognizer.recognizeText(in: image)
+                output.handleRecognizedText(text)
+            } catch {
+                toast.show("No se pudo reconocer el texto", systemImage: "exclamationmark.triangle")
             }
         }
     }
 
-    private func handleOutcome(_ outcome: CaptureRegionOutcome) {
-        defer { isCapturing = false }
+    /// Abre una imagen del disco en el editor.
+    func annotateImageFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.message = "Elige una imagen para anotar"
 
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url, let image = NSImage(contentsOf: url) else { return }
+        output.openEditor(image)
+    }
+
+    private func handle(_ outcome: CaptureOutcome) {
         switch outcome {
-        case let .captured(image):
-            presentThumbnail(image: image)
-            setStatus("Captura copiada")
+        case let .captured(image, selection):
+            if case let .area(rect) = selection {
+                settings.lastCaptureArea = rect
+            }
+            output.handleScreenshot(image)
         case .cancelled:
-            setStatus("Captura cancelada")
+            break
         case .permissionDenied:
-            setStatus("Activa Screen Recording en Ajustes")
+            toast.show("Activa Grabación de pantalla en Ajustes del Sistema", systemImage: "lock.shield")
         case .failed:
-            setStatus("No se pudo capturar")
-        }
-    }
-
-    private func presentPreview(image: NSImage) {
-        previewPresenter.show(
-            image: image,
-            onCopy: { [weak self] in
-                self?.clipboard.copy(image: image)
-                self?.setStatus("Captura copiada")
-            },
-            onEdit: { [weak self] in
-                self?.presentEditor(image: image)
-            }
-        )
-    }
-
-    private func presentEditor(image: NSImage) {
-        editorPresenter.show(image: image) { [weak self] editedImage in
-            self?.clipboard.copy(image: editedImage)
-            self?.setStatus("Captura editada copiada")
-        }
-    }
-
-    private func presentThumbnail(image: NSImage) {
-        thumbnailPresenter.show(
-            image: image,
-            onOpen: { [weak self] in
-                self?.presentPreview(image: image)
-            },
-            onEdit: { [weak self] in
-                self?.presentEditor(image: image)
-            },
-            onCopy: { [weak self] in
-                self?.clipboard.copy(image: image)
-                self?.setStatus("Captura copiada")
-            }
-        )
-    }
-
-    private func setStatus(_ message: String?) {
-        statusTask?.cancel()
-        statusMessage = message
-
-        guard message != nil else { return }
-
-        statusTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                self?.statusMessage = nil
-            }
+            toast.show("No se pudo capturar", systemImage: "exclamationmark.triangle")
         }
     }
 }
