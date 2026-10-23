@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MenuBarView: View {
     @ObservedObject var viewModel: CaptureFlowViewModel
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -15,6 +16,11 @@ struct MenuBarView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Button("Ajustes...") {
+                NSApp.activate(ignoringOtherApps: true)
+                openSettings()
             }
 
             Divider()

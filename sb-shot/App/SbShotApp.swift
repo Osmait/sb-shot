@@ -5,8 +5,8 @@
 //  Created by Jose Saul Burgos on 3/4/26.
 //
 
-import SwiftUI
 import AppKit
+import SwiftUI
 
 @main
 struct SbShotApp: App {
@@ -19,13 +19,13 @@ struct SbShotApp: App {
         }
 
         Settings {
-            EmptyView()
+            SettingsView(settingsStore: container.shortcutSettingsStore)
         }
     }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    func applicationDidFinishLaunching(_: Notification) {
         NSApp.setActivationPolicy(.accessory)
     }
 }

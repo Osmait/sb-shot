@@ -1,5 +1,4 @@
 import AppKit
-import CoreGraphics
 import ScreenCaptureKit
 
 struct ScreenCaptureService {

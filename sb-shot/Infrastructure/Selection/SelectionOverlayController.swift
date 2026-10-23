@@ -20,7 +20,7 @@ final class SelectionOverlayController: NSObject {
         overlayView.onSelectionFinished = { [weak self] localRect in
             guard let self else { return }
             let globalRect = localRect.map { $0.offsetBy(dx: desktopFrame.minX, dy: desktopFrame.minY) }
-            self.finish(with: globalRect)
+            finish(with: globalRect)
         }
 
         let window = SelectionWindow(
@@ -59,8 +59,13 @@ final class SelectionOverlayController: NSObject {
 private final class SelectionWindow: NSWindow {
     var onCancel: (() -> Void)?
 
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
+    override var canBecomeKey: Bool {
+        true
+    }
+
+    override var canBecomeMain: Bool {
+        true
+    }
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 {
@@ -77,7 +82,9 @@ private final class SelectionOverlayView: NSView {
     private var dragStart: CGPoint?
     private var dragCurrent: CGPoint?
 
-    override var acceptsFirstResponder: Bool { true }
+    override var acceptsFirstResponder: Bool {
+        true
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         NSColor.clear.setFill()
@@ -123,7 +130,7 @@ private final class SelectionOverlayView: NSView {
         onSelectionFinished?(isValid ? rect : nil)
     }
 
-    override func rightMouseDown(with event: NSEvent) {
+    override func rightMouseDown(with _: NSEvent) {
         onSelectionFinished?(nil)
     }
 

@@ -5,12 +5,12 @@
 //  Created by Jose Saul Burgos on 3/4/26.
 //
 
-import Testing
 import AppKit
 @testable import SbShot
+import Testing
 
 struct SbShotTests {
-    @Test func captureRegionCopiesImageWhenSuccessful() async throws {
+    @Test func captureRegionCopiesImageWhenSuccessful() async {
         let image = NSImage(size: NSSize(width: 10, height: 10))
         let permissions = MockPermissions(preflight: true, requestResult: true)
         let selector = MockSelector(result: CGRect(x: 10, y: 10, width: 50, height: 40))
@@ -26,7 +26,7 @@ struct SbShotTests {
 
         let outcome = await useCase.execute()
 
-        guard case .captured(let capturedImage) = outcome else {
+        guard case let .captured(capturedImage) = outcome else {
             Issue.record("Expected capture outcome")
             return
         }
@@ -35,7 +35,7 @@ struct SbShotTests {
         #expect(clipboard.copyCount == 1)
     }
 
-    @Test func captureRegionRequestsPermissionAndOpensSettingsWhenDenied() async throws {
+    @Test func captureRegionRequestsPermissionAndOpensSettingsWhenDenied() async {
         let permissions = MockPermissions(preflight: false, requestResult: false)
         let selector = MockSelector(result: nil)
         let capturer = MockCapturer(result: .failure(MockError.captureFailed))
@@ -60,7 +60,7 @@ struct SbShotTests {
         #expect(clipboard.copyCount == 0)
     }
 
-    @Test func captureRegionReturnsCancelledWhenSelectionIsCancelled() async throws {
+    @Test func captureRegionReturnsCancelledWhenSelectionIsCancelled() async {
         let permissions = MockPermissions(preflight: true, requestResult: true)
         let selector = MockSelector(result: nil)
         let capturer = MockCapturer(result: .failure(MockError.captureFailed))
@@ -135,7 +135,7 @@ private final class MockCapturer: ScreenCaptureProviding {
         self.result = result
     }
 
-    func captureRegion(_ rect: CGRect) async throws -> NSImage {
+    func captureRegion(_: CGRect) async throws -> NSImage {
         captureCount += 1
         return try result.get()
     }
@@ -144,8 +144,7 @@ private final class MockCapturer: ScreenCaptureProviding {
 private final class MockClipboard: ClipboardWriting {
     private(set) var copyCount = 0
 
-    func copy(image: NSImage) {
+    func copy(image _: NSImage) {
         copyCount += 1
     }
-
 }

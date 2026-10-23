@@ -1,5 +1,4 @@
 import AppKit
-import CoreGraphics
 
 enum CaptureRegionOutcome {
     case captured(NSImage)

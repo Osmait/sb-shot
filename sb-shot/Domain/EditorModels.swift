@@ -8,16 +8,18 @@ enum EditorTool: String, CaseIterable, Identifiable {
     case text
     case pencil
 
-    var id: String { rawValue }
+    var id: String {
+        rawValue
+    }
 
     var iconName: String {
         switch self {
-        case .line: return "line.diagonal"
-        case .arrow: return "arrow.up.right"
-        case .rectangle: return "rectangle"
-        case .ellipse: return "circle"
-        case .text: return "textformat"
-        case .pencil: return "pencil"
+        case .line: "line.diagonal"
+        case .arrow: "arrow.up.right"
+        case .rectangle: "rectangle"
+        case .ellipse: "circle"
+        case .text: "textformat"
+        case .pencil: "pencil"
         }
     }
 }

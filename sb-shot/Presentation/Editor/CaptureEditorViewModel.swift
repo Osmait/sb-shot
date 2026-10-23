@@ -1,6 +1,6 @@
 import AppKit
-import SwiftUI
 import Combine
+import SwiftUI
 
 @MainActor
 final class CaptureEditorViewModel: ObservableObject {
@@ -45,8 +45,13 @@ final class CaptureEditorViewModel: ObservableObject {
         annotations = next
     }
 
-    var canUndo: Bool { !undoStack.isEmpty }
-    var canRedo: Bool { !redoStack.isEmpty }
+    var canUndo: Bool {
+        !undoStack.isEmpty
+    }
+
+    var canRedo: Bool {
+        !redoStack.isEmpty
+    }
 
     func renderedImage() -> NSImage {
         renderer.render(baseImage: baseImage, annotations: annotations)

@@ -29,37 +29,37 @@ struct AnnotationRenderer {
         context.setLineJoin(.round)
 
         switch annotation.kind {
-        case .line(let start, let end):
+        case let .line(start, end):
             context.beginPath()
             context.move(to: start)
             context.addLine(to: end)
             context.strokePath()
 
-        case .arrow(let start, let end):
+        case let .arrow(start, end):
             drawArrow(start: start, end: end, style: annotation.style, in: context)
 
-        case .rectangle(let rect):
+        case let .rectangle(rect):
             if annotation.style.fill {
                 context.setFillColor(nsColor.withAlphaComponent(0.2).cgColor)
                 context.fill(rect)
             }
             context.stroke(rect)
 
-        case .ellipse(let rect):
+        case let .ellipse(rect):
             if annotation.style.fill {
                 context.setFillColor(nsColor.withAlphaComponent(0.2).cgColor)
                 context.fillEllipse(in: rect)
             }
             context.strokeEllipse(in: rect)
 
-        case .text(let content, let origin):
+        case let .text(content, origin):
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: max(annotation.style.lineWidth * 4, 14), weight: .semibold),
-                .foregroundColor: nsColor
+                .foregroundColor: nsColor,
             ]
             (content as NSString).draw(at: origin, withAttributes: attrs)
 
-        case .freehand(let points):
+        case let .freehand(points):
             guard let first = points.first else { return }
             context.beginPath()
             context.move(to: first)
@@ -76,24 +76,13 @@ struct AnnotationRenderer {
         context.addLine(to: end)
         context.strokePath()
 
-        let angle = atan2(end.y - start.y, end.x - start.x)
-        let headLength = max(style.lineWidth * 4.5, 12)
-        let spread = CGFloat.pi / 7
-
-        let p1 = CGPoint(
-            x: end.x - headLength * cos(angle - spread),
-            y: end.y - headLength * sin(angle - spread)
-        )
-        let p2 = CGPoint(
-            x: end.x - headLength * cos(angle + spread),
-            y: end.y - headLength * sin(angle + spread)
-        )
+        let head = ArrowHead(from: start, to: end, lineWidth: style.lineWidth)
 
         context.beginPath()
-        context.move(to: end)
-        context.addLine(to: p1)
-        context.move(to: end)
-        context.addLine(to: p2)
+        context.move(to: head.tip)
+        context.addLine(to: head.left)
+        context.move(to: head.tip)
+        context.addLine(to: head.right)
         context.strokePath()
     }
 }

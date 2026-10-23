@@ -1,5 +1,4 @@
 import AppKit
-import CoreGraphics
 
 struct PermissionService {
     func hasScreenRecordingAccess() -> Bool {

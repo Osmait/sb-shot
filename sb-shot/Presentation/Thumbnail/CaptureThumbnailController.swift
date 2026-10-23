@@ -57,7 +57,7 @@ final class CaptureThumbnailController: NSWindowController, NSWindowDelegate {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
@@ -80,7 +80,7 @@ final class CaptureThumbnailController: NSWindowController, NSWindowDelegate {
         super.close()
     }
 
-    func windowWillClose(_ notification: Notification) {
+    func windowWillClose(_: Notification) {
         onClose()
     }
 
@@ -90,12 +90,12 @@ final class CaptureThumbnailController: NSWindowController, NSWindowDelegate {
             return
         }
 
-        NSAnimationContext.runAnimationGroup({ context in
+        NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.2
             panel.animator().alphaValue = 0
-        }, completionHandler: { [weak self] in
+        } completionHandler: { [weak self] in
             self?.close()
-        })
+        }
     }
 
     private func handleHoverChange(isHovering: Bool) {
@@ -110,7 +110,7 @@ final class CaptureThumbnailController: NSWindowController, NSWindowDelegate {
         autoCloseTask?.cancel()
         autoCloseTask = Task { [weak self] in
             guard let self else { return }
-            try? await Task.sleep(nanoseconds: self.autoCloseDelay)
+            try? await Task.sleep(nanoseconds: autoCloseDelay)
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 self.closeWithFade()
@@ -182,7 +182,6 @@ private struct CaptureThumbnailView: View {
         }
     }
 
-    @ViewBuilder
     private func actionButton(systemName: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)

@@ -1,0 +1,11 @@
+--swiftversion 6.0
+--indent 4
+--indentcase false
+--trimwhitespace always
+--voidtype void
+--semicolons never
+--self remove
+--stripunusedargs always
+--importgrouping alpha
+--commas always
+--wrapcollections before-first

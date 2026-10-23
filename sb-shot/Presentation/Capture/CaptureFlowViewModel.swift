@@ -1,4 +1,3 @@
-import Foundation
 import AppKit
 import Combine
 
@@ -49,7 +48,7 @@ final class CaptureFlowViewModel: ObservableObject {
         defer { isCapturing = false }
 
         switch outcome {
-        case .captured(let image):
+        case let .captured(image):
             presentThumbnail(image: image)
             setStatus("Captura copiada")
         case .cancelled:
