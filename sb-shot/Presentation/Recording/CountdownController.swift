@@ -31,7 +31,8 @@ final class CountdownController: CountdownPresenting {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = FirstMouseHostingView(rootView: CountdownView(model: model) { model.isCancelled = true })
         // Se activa la app para que Esc llegue al monitor local aunque se haya iniciado con un atajo global.
-        NSApp.activate(ignoringOtherApps: true)
+        // Al terminar se devuelve el foco a la app que se va a grabar o capturar.
+        let previousApp = AppFocus.activate()
         panel.makeKeyAndOrderFront(nil)
 
         let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -46,6 +47,7 @@ final class CountdownController: CountdownPresenting {
                 NSEvent.removeMonitor(monitor)
             }
             panel.orderOut(nil)
+            AppFocus.restore(previousApp)
         }
 
         for value in stride(from: seconds, to: 0, by: -1) {

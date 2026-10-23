@@ -18,8 +18,21 @@ enum SoundPlayer {
 }
 
 enum LaunchAtLogin {
-    static var isEnabled: Bool {
-        SMAppService.mainApp.status == .enabled
+    static var status: SMAppService.Status {
+        SMAppService.mainApp.status
+    }
+
+    /// Activado, o registrado y a la espera de que el usuario lo apruebe en Ajustes del Sistema.
+    static var isOn: Bool {
+        status == .enabled || status == .requiresApproval
+    }
+
+    static var requiresApproval: Bool {
+        status == .requiresApproval
+    }
+
+    static func openSystemSettings() {
+        SMAppService.openSystemSettingsLoginItems()
     }
 
     static func setEnabled(_ enabled: Bool) {

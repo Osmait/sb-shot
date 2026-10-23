@@ -57,6 +57,7 @@ final class VideoEditorWindowController: NSWindowController, NSWindowDelegate {
 
     /// Espacio reproduce o pausa; I y O fijan el inicio y el fin en la posicion actual.
     private func installKeyMonitor() {
+        guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, let window, event.window === window, !(window.firstResponder is NSTextView) else { return event }
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -75,7 +76,7 @@ final class VideoEditorWindowController: NSWindowController, NSWindowDelegate {
 
 // MARK: - Model
 
-private enum VideoQuality: CaseIterable {
+enum VideoQuality: CaseIterable {
     case small
     case medium
     case original
@@ -108,16 +109,22 @@ private enum VideoQuality: CaseIterable {
     }
 }
 
+/// Tiempo de reproduccion aparte del modelo: cambia ~30 veces por segundo y solo lo observan el cabezal y el contador.
 @MainActor
-private final class VideoEditorModel: ObservableObject {
+final class PlaybackClock: ObservableObject {
+    @Published var time: Double = 0
+}
+
+@MainActor
+final class VideoEditorModel: ObservableObject {
     let videoURL: URL
     let player: AVPlayer
     let actions: VideoEditorActions
+    let clock = PlaybackClock()
 
     @Published private(set) var duration: Double = 0
     @Published private(set) var trimStart: Double = 0
     @Published private(set) var trimEnd: Double = 0
-    @Published private(set) var currentTime: Double = 0
     @Published private(set) var isPlaying = false
     @Published private(set) var thumbnails: [NSImage] = []
     @Published private(set) var hasAudio = false
@@ -147,6 +154,7 @@ private final class VideoEditorModel: ObservableObject {
     private var fileSize: Int64 = 0
     private var timeObserver: Any?
     private var previewTask: Task<Void, Never>?
+    private var exportTask: Task<Void, Never>?
 
     static let minimumLength = 0.3
 
@@ -171,6 +179,10 @@ private final class VideoEditorModel: ObservableObject {
 
     var fpsOptions: [Int] {
         format == .gif ? [10, 15, 24] : [24, 30, 60]
+    }
+
+    var currentTime: Double {
+        clock.time
     }
 
     var trimLength: Double {
@@ -209,17 +221,20 @@ private final class VideoEditorModel: ObservableObject {
 
     func seek(to seconds: Double) {
         let clamped = min(max(seconds, 0), duration)
-        currentTime = clamped
+        clock.time = clamped
         player.seek(to: CMTime(seconds: clamped, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
+    /// Sin duracion cargada o con clips mas cortos que el minimo no hay recorte posible.
     func setTrimStart(_ seconds: Double) {
-        trimStart = min(max(seconds, 0), trimEnd - Self.minimumLength)
+        guard duration >= Self.minimumLength else { return }
+        trimStart = max(min(seconds, trimEnd - Self.minimumLength), 0)
         pauseAndSeek(to: trimStart)
     }
 
     func setTrimEnd(_ seconds: Double) {
-        trimEnd = max(min(seconds, duration), trimStart + Self.minimumLength)
+        guard duration >= Self.minimumLength else { return }
+        trimEnd = min(max(seconds, trimStart + Self.minimumLength), duration)
         pauseAndSeek(to: trimEnd)
     }
 
@@ -230,6 +245,8 @@ private final class VideoEditorModel: ObservableObject {
 
     func tearDown() {
         previewTask?.cancel()
+        exportTask?.cancel()
+        exportTask = nil
         player.pause()
         if let timeObserver {
             player.removeTimeObserver(timeObserver)
@@ -263,12 +280,12 @@ private final class VideoEditorModel: ObservableObject {
     /// Aplica el fondo a la reproduccion. Se agrupan los cambios seguidos de los sliders.
     private func scheduleBackgroundPreview() {
         previewTask?.cancel()
-        let style = backgroundStyle
         previewTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 120_000_000)
             guard !Task.isCancelled, let self, let item = player.currentItem else { return }
 
-            if let style {
+            // El estilo desenfoca el fondo de pantalla: se calcula tras la espera para no hacerlo en cada tick del slider.
+            if let style = backgroundStyle {
                 item.videoComposition = try? await VideoBackgroundCompositor.makeComposition(for: item.asset, style: style)
             } else {
                 item.videoComposition = nil
@@ -307,14 +324,22 @@ private final class VideoEditorModel: ObservableObject {
         isPlaying = false
         isExporting = true
 
+        // Cada exportacion va a su propia carpeta temporal: no pisa un archivo ya copiado o pegado
+        // ni choca con otro editor de la misma grabacion, y conserva un nombre legible.
         let base = videoURL.deletingPathExtension().lastPathComponent
-        let output = videoURL.deletingLastPathComponent()
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sb-shot", isDirectory: true)
+            .appendingPathComponent("export-\(UUID().uuidString)", isDirectory: true)
+        let output = folder
             .appendingPathComponent("\(base) recorte")
             .appendingPathExtension(format == .gif ? "gif" : "mp4")
 
-        Task {
-            defer { isExporting = false }
+        exportTask?.cancel()
+        exportTask = Task { [weak self] in
+            defer { self?.isExporting = false }
+            guard let self else { return }
             do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
                 let url: URL = switch format {
                 case .mp4:
                     try await VideoExporter.export(
@@ -336,9 +361,17 @@ private final class VideoEditorModel: ObservableObject {
                         background: style
                     )
                 }
+                // Si la ventana se cerro durante la exportacion no se copia ni se guarda nada.
+                guard !Task.isCancelled else {
+                    try? FileManager.default.removeItem(at: folder)
+                    return
+                }
                 completion(url)
             } catch {
-                NSSound.beep()
+                try? FileManager.default.removeItem(at: folder)
+                if !Task.isCancelled {
+                    NSSound.beep()
+                }
             }
         }
     }
@@ -372,7 +405,7 @@ private final class VideoEditorModel: ObservableObject {
 
     private func playerDidAdvance(to seconds: Double) {
         guard seconds.isFinite else { return }
-        currentTime = seconds
+        clock.time = seconds
         if isPlaying, seconds >= trimEnd {
             player.pause()
             isPlaying = false
@@ -475,10 +508,37 @@ private struct VideoEditorView: View {
 
             Spacer()
 
-            Text("\(VideoEditorModel.timeString(model.currentTime)) / \(VideoEditorModel.timeString(model.duration))")
-                .font(.system(size: 12).monospacedDigit())
-                .foregroundStyle(.secondary)
+            PlaybackTimeLabel(clock: model.clock, duration: model.duration)
         }
+    }
+}
+
+private struct PlaybackTimeLabel: View {
+    @ObservedObject var clock: PlaybackClock
+    let duration: Double
+
+    var body: some View {
+        Text("\(VideoEditorModel.timeString(clock.time)) / \(VideoEditorModel.timeString(duration))")
+            .font(.system(size: 12).monospacedDigit())
+            .foregroundStyle(.secondary)
+    }
+}
+
+/// Cabezal de la barra de recorte; es lo unico de la barra que se redibuja durante la reproduccion.
+private struct Playhead: View {
+    @ObservedObject var clock: PlaybackClock
+    let duration: Double
+    let width: CGFloat
+    let height: CGFloat
+
+    var body: some View {
+        let x = duration > 0 ? CGFloat(clock.time / duration) * width : 0
+        Rectangle()
+            .fill(Color.white)
+            .frame(width: 2, height: height + 8)
+            .shadow(color: .black.opacity(0.6), radius: 2)
+            .offset(x: x - 1, y: -4)
+            .allowsHitTesting(false)
     }
 }
 
@@ -531,12 +591,7 @@ private struct TrimBar: View {
                     .gesture(handleGesture(width: width) { model.setTrimEnd($0) })
                     .help("Arrastra para fijar el fin")
 
-                Rectangle()
-                    .fill(Color.white)
-                    .frame(width: 2, height: height + 8)
-                    .shadow(color: .black.opacity(0.6), radius: 2)
-                    .offset(x: x(for: model.currentTime, width: width) - 1, y: -4)
-                    .allowsHitTesting(false)
+                Playhead(clock: model.clock, duration: model.duration, width: width, height: height)
             }
         }
     }

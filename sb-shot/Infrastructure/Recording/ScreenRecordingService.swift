@@ -29,6 +29,11 @@ final class ScreenRecordingService: NSObject {
     private var outputURL: URL?
     private var finishContinuation: CheckedContinuation<Void, Error>?
     private var isStopping = false
+    /// Resultado del archivo si el delegado lo reporta antes de que alguien espere en `stop()`.
+    private var finishResult: Result<Void, Error>?
+    /// El stream ya se detuvo solo; `stopCapture()` fallaria.
+    private var streamDidStop = false
+    private var didReportUnexpectedStop = false
     private var stopFallbackTask: Task<Void, Never>?
     private let sink = StreamSink()
 
@@ -87,6 +92,9 @@ final class ScreenRecordingService: NSObject {
         recordingOutput = output
         outputURL = url
         isStopping = false
+        finishResult = nil
+        streamDidStop = false
+        didReportUnexpectedStop = false
 
         do {
             try await stream.startCapture()
@@ -103,14 +111,22 @@ final class ScreenRecordingService: NSObject {
         defer { reset() }
 
         do {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                finishContinuation = continuation
-                stopFallbackTask = Task { [weak self] in
-                    try? await stream.stopCapture()
-                    // Si el delegado no confirma el cierre del archivo, se continua tras una espera prudente.
-                    try? await Task.sleep(nanoseconds: 10_000_000_000)
-                    guard !Task.isCancelled else { return }
-                    self?.resumeFinish(with: nil)
+            if let finishResult {
+                // El archivo ya se cerro (por ejemplo, se cerro la ventana grabada).
+                try finishResult.get()
+            } else {
+                let alreadyStopped = streamDidStop
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    finishContinuation = continuation
+                    stopFallbackTask = Task { [weak self] in
+                        if !alreadyStopped {
+                            try? await stream.stopCapture()
+                        }
+                        // Si el delegado no confirma el cierre del archivo, se continua tras una espera prudente.
+                        try? await Task.sleep(nanoseconds: alreadyStopped ? 3_000_000_000 : 10_000_000_000)
+                        guard !Task.isCancelled else { return }
+                        self?.resumeFinish(with: nil)
+                    }
                 }
             }
         } catch {
@@ -128,7 +144,9 @@ final class ScreenRecordingService: NSObject {
     func cancel() async {
         guard let stream else { return }
         isStopping = true
-        try? await stream.stopCapture()
+        if !streamDidStop {
+            try? await stream.stopCapture()
+        }
         if let outputURL {
             try? FileManager.default.removeItem(at: outputURL)
         }
@@ -233,7 +251,13 @@ final class ScreenRecordingService: NSObject {
     }
 
     private func resumeFinish(with error: Error?) {
-        guard let continuation = finishContinuation else { return }
+        guard let continuation = finishContinuation else {
+            // Nadie espera todavia: se guarda para que `stop()` termine sin esperar al respaldo.
+            if stream != nil, finishResult == nil {
+                finishResult = error.map { .failure($0) } ?? .success(())
+            }
+            return
+        }
         finishContinuation = nil
         if let error {
             continuation.resume(throwing: error)
@@ -249,6 +273,9 @@ final class ScreenRecordingService: NSObject {
         recordingOutput = nil
         outputURL = nil
         isStopping = false
+        finishResult = nil
+        streamDidStop = false
+        didReportUnexpectedStop = false
     }
 
     private func isCurrent(stream id: ObjectIdentifier) -> Bool {
@@ -259,9 +286,10 @@ final class ScreenRecordingService: NSObject {
         recordingOutput.map(ObjectIdentifier.init) == id
     }
 
+    /// Avisa una sola vez por sesion, aunque fallen el stream y la salida a la vez.
     private func handleUnexpectedStop(_ error: Error?) {
-        guard !isStopping, stream != nil else { return }
-        resumeFinish(with: error)
+        guard !isStopping, stream != nil, !didReportUnexpectedStop else { return }
+        didReportUnexpectedStop = true
         onUnexpectedStop?(error)
     }
 }
@@ -274,6 +302,7 @@ extension ScreenRecordingService: SCStreamDelegate {
         Task { @MainActor in
             // Ignora avisos tardios de una sesion anterior (por ejemplo, despues de reiniciar).
             guard self.isCurrent(stream: id) else { return }
+            self.streamDidStop = true
             self.handleUnexpectedStop(error)
         }
     }
@@ -285,6 +314,7 @@ extension ScreenRecordingService: SCRecordingOutputDelegate {
         Task { @MainActor in
             guard self.isCurrent(output: id) else { return }
             self.resumeFinish(with: nil)
+            self.handleUnexpectedStop(nil)
         }
     }
 
@@ -292,11 +322,8 @@ extension ScreenRecordingService: SCRecordingOutputDelegate {
         let id = ObjectIdentifier(output)
         Task { @MainActor in
             guard self.isCurrent(output: id) else { return }
-            if self.isStopping {
-                self.resumeFinish(with: error)
-            } else {
-                self.handleUnexpectedStop(error)
-            }
+            self.resumeFinish(with: error)
+            self.handleUnexpectedStop(error)
         }
     }
 }

@@ -2,11 +2,15 @@ import AppKit
 import CoreImage
 
 /// Imagen base y sus variantes (pixelada, desenfocada) que usa el renderer. Las variantes se calculan una sola vez.
-final class RenderSources {
+/// Se puede usar desde cualquier hilo: cada variante tiene su propio lock, asi un calculo en segundo plano
+/// (`prepare`) y un dibujado que la necesite comparten el mismo resultado.
+nonisolated final class RenderSources: @unchecked Sendable {
     let base: CGImage
     /// Tamano en puntos de la imagen original. Las anotaciones se guardan en este espacio.
     let pointSize: CGSize
 
+    private let pixelatedLock = NSLock()
+    private let blurredLock = NSLock()
     private var pixelatedCache: CGImage?
     private var blurredCache: CGImage?
 
@@ -28,6 +32,8 @@ final class RenderSources {
     }
 
     var pixelated: CGImage? {
+        pixelatedLock.lock()
+        defer { pixelatedLock.unlock() }
         if let pixelatedCache {
             return pixelatedCache
         }
@@ -41,6 +47,8 @@ final class RenderSources {
     }
 
     var blurred: CGImage? {
+        blurredLock.lock()
+        defer { blurredLock.unlock() }
         if let blurredCache {
             return blurredCache
         }
@@ -57,6 +65,11 @@ final class RenderSources {
         case .pixelate: pixelated
         case .blur: blurred
         }
+    }
+
+    /// Calcula la variante de antemano, para no hacerlo al dibujar o exportar. Pensado para un hilo de fondo.
+    func prepare(_ mode: ObfuscationMode) {
+        _ = image(for: mode)
     }
 
     private static func downsample(_ image: CGImage, maxPixelDimension: CGFloat) -> CGImage? {

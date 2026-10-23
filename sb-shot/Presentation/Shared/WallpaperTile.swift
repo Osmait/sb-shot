@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Boton para usar el fondo de pantalla actual como fondo. Muestra una miniatura y lo vuelve a leer al aparecer.
+/// Boton para usar el fondo de pantalla actual como fondo. Muestra una miniatura y lo vuelve a leer al aparecer si la lectura anterior es vieja.
 struct WallpaperTile: View {
     let isSelected: Bool
     var height: CGFloat = 40
@@ -48,7 +48,7 @@ struct WallpaperTile: View {
         .buttonStyle(.plain)
         .help("Usar tu fondo de pantalla actual")
         .task {
-            await provider.refresh()
+            await provider.refreshIfStale()
         }
     }
 

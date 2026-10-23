@@ -85,7 +85,7 @@ enum EditorTool: String, CaseIterable, Identifiable {
     }
 }
 
-enum ObfuscationMode: String, CaseIterable, Identifiable {
+nonisolated enum ObfuscationMode: String, CaseIterable, Identifiable, Sendable {
     case pixelate
     case blur
 
@@ -101,7 +101,7 @@ enum ObfuscationMode: String, CaseIterable, Identifiable {
     }
 }
 
-struct AnnotationStyle: Equatable {
+nonisolated struct AnnotationStyle: Equatable, Sendable {
     var color: Color
     var lineWidth: CGFloat
     var fill: Bool
@@ -110,8 +110,8 @@ struct AnnotationStyle: Equatable {
     var obfuscation: ObfuscationMode = .pixelate
 }
 
-struct EditorAnnotation: Identifiable, Equatable {
-    enum Kind: Equatable {
+nonisolated struct EditorAnnotation: Identifiable, Equatable, Sendable {
+    enum Kind: Equatable, Sendable {
         case line(start: CGPoint, end: CGPoint)
         case arrow(start: CGPoint, end: CGPoint)
         case rectangle(CGRect)
@@ -144,7 +144,7 @@ struct EditorAnnotation: Identifiable, Equatable {
 
 // MARK: - Background
 
-struct BackgroundPreset: Identifiable {
+nonisolated struct BackgroundPreset: Identifiable, Sendable {
     let id: Int
     let colors: [Color]
 
@@ -160,7 +160,7 @@ struct BackgroundPreset: Identifiable {
     ]
 }
 
-enum BackgroundAspect: String, CaseIterable, Identifiable {
+nonisolated enum BackgroundAspect: String, CaseIterable, Identifiable, Sendable {
     case auto
     case wide
     case standard
@@ -190,7 +190,7 @@ enum BackgroundAspect: String, CaseIterable, Identifiable {
     }
 }
 
-struct BackgroundSettings: Equatable {
+nonisolated struct BackgroundSettings: Equatable, Sendable {
     var isEnabled = false
     var presetIndex = 0
     var padding: CGFloat = 64
@@ -209,7 +209,7 @@ struct BackgroundSettings: Equatable {
 
 // MARK: - Document
 
-struct EditorDocument: Equatable {
+nonisolated struct EditorDocument: Equatable, Sendable {
     var annotations: [EditorAnnotation] = []
     /// Recorte en coordenadas de la imagen. `nil` usa la imagen completa.
     var cropRect: CGRect?

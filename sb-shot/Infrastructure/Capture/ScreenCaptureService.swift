@@ -36,16 +36,32 @@ struct ScreenCaptureService {
     }
 
     func displaySnapshots() async throws -> [CGDirectDisplayID: CGImage] {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        let excluded = ownWindows(in: content)
-        var snapshots: [CGDirectDisplayID: CGImage] = [:]
+        try await displaySnapshots(hidingDesktopIcons: false)
+    }
 
-        for display in content.displays {
+    func displaySnapshots(hidingDesktopIcons: Bool) async throws -> [CGDirectDisplayID: CGImage] {
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        let excluded = excludedWindows(in: content, hideDesktopIcons: hidingDesktopIcons)
+        let requests = content.displays.map { display in
             let filter = SCContentFilter(display: display, excludingWindows: excluded)
             let config = configuration(for: filter, size: display.frame.size, scale: CGFloat(filter.pointPixelScale))
-            snapshots[display.displayID] = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+            return (id: display.displayID, filter: filter, config: config)
         }
-        return snapshots
+
+        // Las pantallas se capturan a la vez: en serie, con varias pantallas Retina, el overlay tarda en aparecer.
+        return try await withThrowingTaskGroup(of: (CGDirectDisplayID, CGImage).self) { group in
+            for request in requests {
+                group.addTask {
+                    let image = try await SCScreenshotManager.captureImage(contentFilter: request.filter, configuration: request.config)
+                    return (request.id, image)
+                }
+            }
+            var snapshots: [CGDirectDisplayID: CGImage] = [:]
+            for try await (id, image) in group {
+                snapshots[id] = image
+            }
+            return snapshots
+        }
     }
 
     func capture(_ selection: ScreenSelection, options: CaptureOptions) async throws -> NSImage {
@@ -113,7 +129,8 @@ struct ScreenCaptureService {
             // Si el area queda parcialmente fuera de las pantallas, el resultado es solo la parte visible.
             return NSImage(cgImage: chunk.image, size: chunk.destination.size)
         }
-        return try compose(chunks, size: selection.size, scale: outputScale)
+        let composed = try await Self.compose(chunks, size: selection.size, scale: outputScale)
+        return NSImage(cgImage: composed, size: selection.size)
     }
 
     private func captureWindow(_ window: SCWindow, options: CaptureOptions) async throws -> NSImage {
@@ -131,7 +148,7 @@ struct ScreenCaptureService {
         config.scalesToFit = false
 
         var image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-        if margin > 0, let trimmed = Self.trimmingTransparentEdges(image) {
+        if margin > 0, let trimmed = await Self.trimmingTransparentEdges(image) {
             image = trimmed
         }
         let size = CGSize(width: CGFloat(image.width) / scale, height: CGFloat(image.height) / scale)
@@ -140,35 +157,42 @@ struct ScreenCaptureService {
 
     private static let shadowMargin: CGFloat = 100
 
-    /// Recorta las filas y columnas totalmente transparentes alrededor de la imagen.
-    private static func trimmingTransparentEdges(_ image: CGImage) -> CGImage? {
+    /// Recorta las filas y columnas totalmente transparentes alrededor de la imagen. Se ejecuta fuera del hilo
+    /// principal y solo dibuja el canal alfa (un byte por pixel).
+    @concurrent
+    nonisolated static func trimmingTransparentEdges(_ image: CGImage) async -> CGImage? {
         let width = image.width
         let height = image.height
-        var pixels = [UInt8](repeating: 0, count: width * height * 4)
-
-        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
-            guard let context = CGContext(
-                data: buffer.baseAddress,
+        guard
+            width > 0, height > 0,
+            let context = CGContext(
+                data: nil,
                 width: width,
                 height: height,
                 bitsPerComponent: 8,
-                bytesPerRow: width * 4,
-                space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-            ) else { return false }
-            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-            return true
-        }
-        guard drawn else { return nil }
+                bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceGray(),
+                bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue
+            )
+        else { return nil }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let data = context.data else { return nil }
 
-        func isOpaque(_ x: Int, _ y: Int) -> Bool {
-            pixels[(y * width + x) * 4 + 3] > 2
-        }
+        let alpha = data.assumingMemoryBound(to: UInt8.self)
+        let bytesPerRow = context.bytesPerRow
+
         func rowHasContent(_ y: Int) -> Bool {
-            (0 ..< width).contains { isOpaque($0, y) }
+            let row = alpha + y * bytesPerRow
+            for x in 0 ..< width where row[x] > 2 {
+                return true
+            }
+            return false
         }
         func columnHasContent(_ x: Int, rows: ClosedRange<Int>) -> Bool {
-            rows.contains { isOpaque(x, $0) }
+            for y in rows where alpha[y * bytesPerRow + x] > 2 {
+                return true
+            }
+            return false
         }
 
         // El buffer tiene la primera fila arriba, igual que `cropping(to:)`.
@@ -192,19 +216,29 @@ struct ScreenCaptureService {
         return config
     }
 
-    private func compose(_ chunks: [(image: CGImage, destination: CGRect)], size: CGSize, scale: CGFloat) throws -> NSImage {
+    /// Une los trozos de varias pantallas fuera del hilo principal.
+    @concurrent
+    nonisolated static func compose(
+        _ chunks: [(image: CGImage, destination: CGRect)],
+        size: CGSize,
+        scale: CGFloat
+    ) async throws -> CGImage {
         let width = Int((size.width * scale).rounded())
         let height = Int((size.height * scale).rounded())
 
+        // Igual que `CGColorSpace.renderable(for:)`, que esta aislado al hilo principal.
+        let firstSpace = chunks.first?.image.colorSpace
+        let space = firstSpace?.model == .rgb ? firstSpace : CGColorSpace(name: CGColorSpace.sRGB)
+
         guard
-            let first = chunks.first?.image,
+            let space,
             let context = CGContext(
                 data: nil,
                 width: width,
                 height: height,
                 bitsPerComponent: 8,
                 bytesPerRow: 0,
-                space: CGColorSpace.renderable(for: first),
+                space: space,
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
             )
         else { throw CaptureError.emptyResult }
@@ -221,7 +255,7 @@ struct ScreenCaptureService {
         }
 
         guard let output = context.makeImage() else { throw CaptureError.emptyResult }
-        return NSImage(cgImage: output, size: size)
+        return output
     }
 
     private func ownWindows(in content: SCShareableContent) -> [SCWindow] {

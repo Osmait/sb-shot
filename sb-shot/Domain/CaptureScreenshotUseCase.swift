@@ -11,8 +11,12 @@ struct CaptureScreenshotUseCase {
             return true
         }
 
+        // La primera vez el sistema muestra su propio aviso; los Ajustes solo se abren en intentos posteriores.
+        let alreadyRequested = permissions.hasRequestedScreenRecordingAccess()
         guard permissions.requestScreenRecordingAccess() else {
-            permissions.openScreenRecordingSettings()
+            if alreadyRequested {
+                permissions.openScreenRecordingSettings()
+            }
             return false
         }
         return true
@@ -47,6 +51,7 @@ struct CaptureScreenshotUseCase {
                 // La captura se hace despues de la cuenta regresiva, asi que no se congela la pantalla.
                 options.freezeScreen = false
             }
+            options.hidesDesktopIcons = captureOptions.hideDesktopIcons
 
             guard let result = await selector.select(options: options) else {
                 return .cancelled
@@ -61,7 +66,7 @@ struct CaptureScreenshotUseCase {
         }
 
         if let frozenImage {
-            return .captured(frozenImage, selection)
+            return .captured(captureOptions.downscaleToOneX ? Self.downscaledToPoints(frozenImage) : frozenImage, selection)
         }
 
         do {
@@ -70,5 +75,29 @@ struct CaptureScreenshotUseCase {
         } catch {
             return .failed
         }
+    }
+
+    /// La imagen congelada esta a resolucion Retina; con `downscaleToOneX` se lleva a un pixel por punto.
+    private static func downscaledToPoints(_ image: NSImage) -> NSImage {
+        let width = Int(image.size.width.rounded())
+        let height = Int(image.size.height.rounded())
+        guard
+            let source = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+            source.width > width, width > 0, height > 0,
+            let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: CGColorSpace.renderable(for: source),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        else { return image }
+
+        context.interpolationQuality = .high
+        context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let scaled = context.makeImage() else { return image }
+        return NSImage(cgImage: scaled, size: image.size)
     }
 }

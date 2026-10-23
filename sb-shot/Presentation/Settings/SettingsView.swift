@@ -34,18 +34,31 @@ private struct GeneralSettingsTab: View {
     let fileStorage: FileStorage
     @ObservedObject var history: HistoryStore
 
-    @State private var launchAtLogin = LaunchAtLogin.isEnabled
+    @State private var launchAtLogin = LaunchAtLogin.isOn
+    @State private var launchNeedsApproval = LaunchAtLogin.requiresApproval
     @State private var folderPath = ""
     @State private var hasCustomFolder = false
 
     var body: some View {
         Form {
             Section {
-                Toggle("Abrir sb-shot al iniciar sesión", isOn: $launchAtLogin)
-                    .onChange(of: launchAtLogin) { _, value in
+                // Binding propio en lugar de onChange: reflejar el estado real no vuelve a llamar a setEnabled.
+                Toggle("Abrir sb-shot al iniciar sesión", isOn: Binding(
+                    get: { launchAtLogin },
+                    set: { value in
                         LaunchAtLogin.setEnabled(value)
-                        launchAtLogin = LaunchAtLogin.isEnabled
+                        refreshLaunchAtLogin()
                     }
+                ))
+                if launchNeedsApproval {
+                    LabeledContent {
+                        Button("Abrir Ajustes del Sistema") { LaunchAtLogin.openSystemSettings() }
+                    } label: {
+                        Text("Falta aprobarlo en Ajustes del Sistema › General › Ítems de inicio.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Toggle("Reproducir sonido al capturar", isOn: $settings.playSound)
             }
 
@@ -97,7 +110,18 @@ private struct GeneralSettingsTab: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear(perform: refreshFolder)
+        .onAppear {
+            refreshFolder()
+            refreshLaunchAtLogin()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshLaunchAtLogin()
+        }
+    }
+
+    private func refreshLaunchAtLogin() {
+        launchAtLogin = LaunchAtLogin.isOn
+        launchNeedsApproval = LaunchAtLogin.requiresApproval
     }
 
     private func refreshFolder() {
@@ -255,6 +279,11 @@ private struct ShortcutsSettingsTab: View {
                         ShortcutRecorder(settings: settings, action: action)
                     } label: {
                         Label(action.title, systemImage: action.iconName)
+                        if settings.unavailableShortcuts.contains(action) {
+                            Text("Atajo en uso por otra app")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
                     }
                 }
             } footer: {

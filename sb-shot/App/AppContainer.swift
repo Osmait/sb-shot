@@ -33,7 +33,7 @@ final class AppContainer {
         quickAccess: QuickAccessController(settings: settings),
         editor: EditorWindowPresenter(),
         videoEditor: VideoEditorWindowPresenter(),
-        pins: PinnedImagePresenter(),
+        pins: PinnedImagePresenter(toast: toast),
         toast: toast
     )
 
@@ -68,6 +68,15 @@ final class AppContainer {
     )
 
     init() {
+        fileStorage.onSaveFolderUnavailable = { [weak self] in
+            // Diferido: puede ocurrir durante el arranque, antes de que la app pueda mostrar ventanas.
+            Task { @MainActor in
+                self?.toast.show("La carpeta de guardado ya no está disponible; se usará la predeterminada", systemImage: "folder.badge.questionmark")
+            }
+        }
+        // Resuelve la carpeta al arrancar para avisar enseguida si ya no existe.
+        _ = fileStorage.saveFolder
+        fileStorage.removeStaleTemporaryFiles()
         bindHotkeys()
     }
 
@@ -99,6 +108,12 @@ final class AppContainer {
     }
 
     private func registerHotkeys() {
-        hotkeyManager.register(settings.recordingShortcutFor == nil ? settings.activeShortcuts : [:])
+        let isRecordingShortcut = settings.recordingShortcutFor != nil
+        hotkeyManager.register(isRecordingShortcut ? [:] : settings.activeShortcuts)
+
+        // Mientras se graba un atajo todos estan desactivados a proposito; se conserva el estado anterior.
+        // Solo se publica si cambia, porque cada cambio vuelve a llamar a este metodo.
+        guard !isRecordingShortcut, settings.unavailableShortcuts != hotkeyManager.failedActions else { return }
+        settings.unavailableShortcuts = hotkeyManager.failedActions
     }
 }

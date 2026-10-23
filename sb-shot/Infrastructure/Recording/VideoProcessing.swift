@@ -12,6 +12,15 @@ enum VideoProcessingError: Error {
 nonisolated enum GifExporter {
     /// ImageIO conserva todos los cuadros en memoria hasta finalizar, asi que se limita su numero.
     private static let maxFrames = 600
+
+    /// Numero de cuadros y paso (en segundos) para un tramo: en tramos largos se reparten `maxFrames` por todo el tramo.
+    static func frameSampling(duration seconds: Double, framesPerSecond: Int) -> (frameCount: Int, step: Double, isLong: Bool) {
+        let requestedFrames = seconds * Double(max(framesPerSecond, 1))
+        let isLong = requestedFrames > Double(maxFrames)
+        let frameCount = isLong ? maxFrames : max(Int(requestedFrames), 1)
+        let step = isLong ? seconds / Double(maxFrames) : 1.0 / Double(max(framesPerSecond, 1))
+        return (frameCount, step, isLong)
+    }
     static func export(
         videoURL: URL,
         to outputURL: URL,
@@ -24,21 +33,21 @@ nonisolated enum GifExporter {
         let duration = try await asset.load(.duration)
         let range = timeRange ?? CMTimeRange(start: .zero, duration: duration)
 
-        // En clips largos se bajan los fps y el ancho para mantener la memoria y el tamano del GIF acotados.
-        let requestedFrames = range.duration.seconds * Double(max(framesPerSecond, 1))
-        let fps = requestedFrames > Double(maxFrames)
-            ? max(Int(Double(maxFrames) / max(range.duration.seconds, 1)), 2)
-            : max(framesPerSecond, 1)
-        let width = requestedFrames > Double(maxFrames) ? min(maxWidth, 720) : maxWidth
-        let frameCount = min(max(Int(range.duration.seconds * Double(fps)), 1), maxFrames)
+        // En clips largos se reparten `maxFrames` cuadros por todo el tramo (paso fraccionario) y se baja el ancho
+        // para mantener la memoria y el tamano del GIF acotados sin recortar el final.
+        let seconds = range.duration.seconds
+        let sampling = frameSampling(duration: seconds, framesPerSecond: framesPerSecond)
+        let frameCount = sampling.frameCount
+        let step = sampling.step
+        let width = sampling.isLong ? min(maxWidth, 720) : maxWidth
         let times = (0 ..< frameCount).map {
-            CMTimeAdd(range.start, CMTime(seconds: Double($0) / Double(fps), preferredTimescale: 600))
+            CMTimeAdd(range.start, CMTime(seconds: Double($0) * step, preferredTimescale: 600))
         }
 
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.5 / Double(fps), preferredTimescale: 600)
+        generator.requestedTimeToleranceAfter = CMTime(seconds: step / 2, preferredTimescale: 600)
         generator.maximumSize = CGSize(width: width, height: 10000)
         if let background {
             generator.videoComposition = try await VideoBackgroundCompositor.makeComposition(for: asset, style: background)
@@ -53,7 +62,7 @@ nonisolated enum GifExporter {
             kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0],
         ] as CFDictionary)
 
-        let delay = 1.0 / Double(fps)
+        let delay = step
         let frameProperties = [
             kCGImagePropertyGIFDictionary: [
                 kCGImagePropertyGIFDelayTime: delay,
@@ -64,12 +73,14 @@ nonisolated enum GifExporter {
         var added = 0
         var lastImage: CGImage?
         for await result in generator.images(for: times) {
+            if Task.isCancelled { break }
             // Si un frame falla se repite el anterior para no desfasar la animacion.
             guard let image = (try? result.image) ?? lastImage else { continue }
             CGImageDestinationAddImage(destination, image, frameProperties)
             lastImage = image
             added += 1
         }
+        try Task.checkCancellation()
 
         while added < frameCount, let lastImage {
             CGImageDestinationAddImage(destination, lastImage, frameProperties)

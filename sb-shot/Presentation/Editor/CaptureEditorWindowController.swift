@@ -29,9 +29,17 @@ final class CaptureEditorWindowController: NSWindowController, NSWindowDelegate 
 
         super.init(window: window)
 
+        // Arrastrar necesita el archivo de forma sincrona; se reutiliza el ultimo archivo si la imagen no cambio
+        // y nadie lo reescribio (otro editor usa la misma ruta).
+        var dragFileCache: (image: NSImage, url: URL, modified: Date)?
         let renderedFile = { [weak viewModel] () -> URL? in
             guard let image = viewModel?.renderedImage() else { return nil }
-            return Self.writeDragFile(for: image)
+            if let cached = dragFileCache, cached.image === image, Self.modificationDate(of: cached.url) == cached.modified {
+                return cached.url
+            }
+            guard let url = Self.writeDragFile(for: image) else { return nil }
+            dragFileCache = Self.modificationDate(of: url).map { (image, url, $0) }
+            return url
         }
 
         window.contentView = NSHostingView(rootView: CaptureEditorView(
@@ -68,24 +76,33 @@ final class CaptureEditorWindowController: NSWindowController, NSWindowDelegate 
     // MARK: - Actions
 
     private func copyImage() {
-        actions.onCopy(viewModel.renderedImage())
+        exportImage(actions.onCopy)
     }
 
     private func saveImage() {
-        actions.onSave(viewModel.renderedImage())
+        exportImage(actions.onSave)
     }
 
     private func saveImageAs() {
-        actions.onSaveAs(viewModel.renderedImage())
+        exportImage(actions.onSaveAs)
     }
 
     private func pinImage() {
-        actions.onPin(viewModel.renderedImage())
+        exportImage(actions.onPin)
+    }
+
+    /// Renderiza fuera del hilo principal y entrega la imagen en el hilo principal.
+    private func exportImage(_ action: @escaping (NSImage) -> Void) {
+        let viewModel = viewModel
+        Task {
+            action(await viewModel.renderImage())
+        }
     }
 
     // MARK: - Keyboard
 
     private func installKeyMonitor() {
+        guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, let window, event.window === window else { return event }
             return handleKey(event) ? nil : event
@@ -164,6 +181,10 @@ final class CaptureEditorWindowController: NSWindowController, NSWindowDelegate 
 
         try? data.write(to: url, options: .atomic)
         return url
+    }
+
+    private static func modificationDate(of url: URL) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
     }
 
     private static func preferredSize(for image: NSImage) -> NSSize {

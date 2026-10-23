@@ -7,7 +7,12 @@ final class HotkeyManager {
 
     private var eventHandler: EventHandlerRef?
     private var hotKeyRefs: [EventHotKeyRef] = []
-    private var registered: [CaptureAction: GlobalShortcut] = [:]
+    /// Atajos pedidos en la ultima llamada a `register`, para no repetir el registro.
+    private var requested: [CaptureAction: GlobalShortcut] = [:]
+    /// Solo los atajos que el sistema acepto.
+    private(set) var registered: [CaptureAction: GlobalShortcut] = [:]
+    /// Acciones cuyo atajo no se pudo registrar (normalmente porque otra app ya lo usa).
+    private(set) var failedActions: Set<CaptureAction> = []
 
     init() {
         installHandler()
@@ -23,8 +28,9 @@ final class HotkeyManager {
     }
 
     func register(_ shortcuts: [CaptureAction: GlobalShortcut]) {
-        guard shortcuts != registered else { return }
+        guard shortcuts != requested else { return }
         unregisterAll()
+        requested = shortcuts
 
         for (action, shortcut) in shortcuts {
             guard let index = CaptureAction.allCases.firstIndex(of: action) else { continue }
@@ -42,9 +48,11 @@ final class HotkeyManager {
 
             if status == noErr, let hotKeyRef {
                 hotKeyRefs.append(hotKeyRef)
+                registered[action] = shortcut
+            } else {
+                failedActions.insert(action)
             }
         }
-        registered = shortcuts
     }
 
     private func unregisterAll() {
@@ -52,7 +60,9 @@ final class HotkeyManager {
             UnregisterEventHotKey(ref)
         }
         hotKeyRefs.removeAll()
+        requested = [:]
         registered = [:]
+        failedActions = []
     }
 
     private func installHandler() {

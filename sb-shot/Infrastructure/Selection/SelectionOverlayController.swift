@@ -125,6 +125,10 @@ final class SelectionOverlayController: NSObject {
     private var session: SelectionSession?
     private var snapshots: [CGDirectDisplayID: CGImage] = [:]
     private var completion: ((SelectionResult?) -> Void)?
+    /// App que tenia el foco antes del overlay; se le devuelve al terminar.
+    private var previousApp: NSRunningApplication?
+    /// Zonas (coordenadas globales) dibujadas en el ultimo refresco, para repintar tambien la pantalla que se deja.
+    private var lastDirtyRects: [CGRect] = []
 
     func beginSelection(
         options: SelectionOptions,
@@ -146,7 +150,7 @@ final class SelectionOverlayController: NSObject {
 
         installMonitors()
 
-        NSApp.activate(ignoringOtherApps: true)
+        previousApp = AppFocus.activate()
         let keyScreen = ScreenGeometry.screenUnderCursor
         for window in windows {
             if window.screenFrame == keyScreen?.frame {
@@ -229,8 +233,21 @@ final class SelectionOverlayController: NSObject {
         }
     }
 
+    /// Repinta solo las pantallas afectadas por el estado actual o el anterior (cursor, seleccion, objetivo del clic).
     private func refreshAll() {
-        for view in overlayViews {
+        guard let session else { return }
+
+        var dirty = [CGRect(x: session.mouseLocation.x - 1, y: session.mouseLocation.y - 1, width: 2, height: 2)]
+        if session.isDragging, let dragScreenFrame = session.dragScreenFrame {
+            dirty.append(dragScreenFrame)
+        }
+        if !session.isSelectingArea, let target = session.clickTarget {
+            dirty.append(target.frame)
+        }
+
+        let affected = dirty + lastDirtyRects
+        lastDirtyRects = dirty
+        for view in overlayViews where affected.contains(where: { $0.intersects(view.screenFrame) }) {
             view.needsDisplay = true
         }
     }
@@ -259,7 +276,10 @@ final class SelectionOverlayController: NSObject {
         }
         windows.removeAll()
         overlayViews.removeAll()
+        lastDirtyRects.removeAll()
         NSCursor.arrow.set()
+        AppFocus.restore(previousApp)
+        previousApp = nil
 
         guard let selection else {
             completion(nil)
@@ -322,7 +342,7 @@ private final class SelectionOverlayView: NSView {
     var onFinish: ((ScreenSelection) -> Void)?
     var onCancel: (() -> Void)?
 
-    private let screenFrame: CGRect
+    let screenFrame: CGRect
     private let snapshot: CGImage?
     private let session: SelectionSession
 

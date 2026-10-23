@@ -104,6 +104,7 @@ private final class QuickAccessCard {
 
     func configure(actions: QuickAccessActions) {
         let wrapped = QuickAccessCardView.Actions(
+            fileURL: actions.fileURL,
             copy: actions.onCopy,
             save: actions.onSave,
             edit: { [weak self] in
@@ -186,6 +187,7 @@ private final class QuickAccessCard {
 
 private struct QuickAccessCardView: View {
     struct Actions {
+        let fileURL: () -> URL
         let copy: () -> Void
         let save: () -> Void
         let edit: () -> Void
@@ -212,7 +214,7 @@ private struct QuickAccessCardView: View {
                 .clipped()
 
             FileDragSource(
-                fileURL: { item.fileURL },
+                fileURL: { actions?.fileURL() ?? item.fileURL },
                 previewImage: item.thumbnail,
                 onClick: { actions?.edit() },
                 onDragEnded: { actions?.dragEnded($0) },

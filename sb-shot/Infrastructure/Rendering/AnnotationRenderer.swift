@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Distribucion del documento en el lienzo de salida: recorte, padding del fondo y desplazamiento de la imagen.
-struct RenderLayout {
+nonisolated struct RenderLayout: Sendable {
     let outputSize: CGSize
     /// Donde se dibuja la imagen (recortada) dentro del lienzo de salida.
     let contentRect: CGRect
@@ -56,9 +56,19 @@ struct RenderLayout {
 }
 
 /// Dibuja documentos del editor con CoreGraphics. Lo usan tanto el lienzo como la exportacion,
-/// asi lo que se ve en pantalla coincide con la imagen final.
-struct AnnotationRenderer {
+/// asi lo que se ve en pantalla coincide con la imagen final. No depende del hilo principal, asi la exportacion
+/// puede hacerse en segundo plano.
+nonisolated struct AnnotationRenderer: Sendable {
     func render(document: EditorDocument, sources: RenderSources) -> NSImage {
+        let layout = RenderLayout(document: document, imageSize: sources.pointSize)
+        guard let output = renderImage(document: document, sources: sources) else {
+            return NSImage(cgImage: sources.base, size: sources.pointSize)
+        }
+        return NSImage(cgImage: output, size: layout.outputSize)
+    }
+
+    /// Render a resolucion completa como `CGImage`. Seguro fuera del hilo principal.
+    func renderImage(document: EditorDocument, sources: RenderSources) -> CGImage? {
         let layout = RenderLayout(document: document, imageSize: sources.pointSize)
         let scale = sources.pixelScale
         let width = max(Int((layout.outputSize.width * scale).rounded()), 1)
@@ -74,20 +84,14 @@ struct AnnotationRenderer {
                 space: CGColorSpace.renderable(for: sources.base),
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
             )
-        else {
-            return NSImage(cgImage: sources.base, size: sources.pointSize)
-        }
+        else { return nil }
 
         context.translateBy(x: 0, y: CGFloat(height))
         context.scaleBy(x: scale, y: -scale)
         context.interpolationQuality = .high
 
         draw(document: document, layout: layout, sources: sources, in: context)
-
-        guard let output = context.makeImage() else {
-            return NSImage(cgImage: sources.base, size: sources.pointSize)
-        }
-        return NSImage(cgImage: output, size: layout.outputSize)
+        return context.makeImage()
     }
 
     /// Dibuja en un contexto con origen arriba-izquierda, en unidades del lienzo de salida.
@@ -173,7 +177,10 @@ struct AnnotationRenderer {
 
     private func drawBackground(_ background: BackgroundSettings, size: CGSize, in context: CGContext) {
         if let original = background.wallpaper {
-            let wallpaper = WallpaperBlur.image(original, radius: background.wallpaperBlur)
+            // Version reducida (y desenfocada) al tamano real en pixeles del lienzo, cacheada entre redibujados.
+            let unitScale = hypot(context.ctm.a, context.ctm.b)
+            let pixelSize = CGSize(width: size.width * unitScale, height: size.height * unitScale)
+            let wallpaper = WallpaperBlur.image(original, radius: background.wallpaperBlur, covering: pixelSize)
             let canvas = CGRect(origin: .zero, size: size)
             context.saveGState()
             context.clip(to: canvas)
@@ -385,7 +392,7 @@ struct AnnotationRenderer {
     }
 }
 
-extension Color {
+nonisolated extension Color {
     var cgColorValue: CGColor {
         (NSColor(self).usingColorSpace(.sRGB) ?? .black).cgColor
     }
@@ -398,7 +405,7 @@ extension Color {
     }
 }
 
-extension CGColorSpace {
+nonisolated extension CGColorSpace {
     /// Espacio de color valido para un contexto RGBA; si la imagen no es RGB se usa sRGB.
     static func renderable(for image: CGImage) -> CGColorSpace {
         if let space = image.colorSpace, space.model == .rgb {

@@ -50,6 +50,9 @@ final class AppSettings: ObservableObject {
     /// Mientras se graba un atajo en Ajustes se desactivan los atajos globales.
     @Published var recordingShortcutFor: CaptureAction?
 
+    /// Acciones cuyo atajo global no se pudo registrar (en uso por otra app). Lo actualiza `AppContainer`.
+    @Published var unavailableShortcuts: Set<CaptureAction> = []
+
     // MARK: General
 
     @Preference("general.copyToClipboard") var copyToClipboard = true

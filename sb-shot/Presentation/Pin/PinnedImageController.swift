@@ -5,10 +5,18 @@ import UniformTypeIdentifiers
 
 /// Mantiene capturas flotando sobre todas las ventanas.
 final class PinnedImagePresenter: PinPresenting {
+    private let toast: ToastPresenting
     private var controllers: [PinnedImageController] = []
+
+    init(toast: ToastPresenting) {
+        self.toast = toast
+    }
 
     func pin(image: NSImage, onEdit: @escaping (NSImage) -> Void, onCopy: @escaping (NSImage) -> Void) {
         let controller = PinnedImageController(image: image, onEdit: onEdit, onCopy: onCopy)
+        controller.onSaveFailed = { [weak self] in
+            self?.toast.show("No se pudo guardar la imagen", systemImage: "exclamationmark.triangle")
+        }
         controller.onClose = { [weak self, weak controller] in
             self?.controllers.removeAll { $0 === controller }
         }
@@ -19,6 +27,7 @@ final class PinnedImagePresenter: PinPresenting {
 
 private final class PinnedImageController: NSObject, NSWindowDelegate {
     var onClose: (() -> Void)?
+    var onSaveFailed: (() -> Void)?
 
     private let image: NSImage
     private let panel: PinPanel
@@ -109,13 +118,20 @@ private final class PinnedImageController: NSObject, NSWindowDelegate {
         panel.allowedContentTypes = [.png]
         panel.nameFieldStringValue = "captura-fijada.png"
         NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
         guard
-            panel.runModal() == .OK,
-            let url = panel.url,
             let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
             let data = NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
-        else { return }
-        try? data.write(to: url)
+        else {
+            onSaveFailed?()
+            return
+        }
+        // Escritura atomica: si falla, el archivo que habia en el destino queda intacto.
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            onSaveFailed?()
+        }
     }
 }
 

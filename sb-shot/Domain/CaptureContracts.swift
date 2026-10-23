@@ -10,13 +10,29 @@ enum CaptureOutcome {
 protocol ScreenCaptureProviding {
     /// Captura cada pantalla completa (sin las ventanas de la app) para la lupa y el modo congelado.
     func displaySnapshots() async throws -> [CGDirectDisplayID: CGImage]
+    /// Igual que `displaySnapshots()`, pero puede ocultar los iconos del escritorio (modo congelado).
+    func displaySnapshots(hidingDesktopIcons: Bool) async throws -> [CGDirectDisplayID: CGImage]
     func capture(_ selection: ScreenSelection, options: CaptureOptions) async throws -> NSImage
+}
+
+extension ScreenCaptureProviding {
+    func displaySnapshots(hidingDesktopIcons _: Bool) async throws -> [CGDirectDisplayID: CGImage] {
+        try await displaySnapshots()
+    }
 }
 
 protocol ScreenPermissionChecking {
     func hasScreenRecordingAccess() -> Bool
     func requestScreenRecordingAccess() -> Bool
     func openScreenRecordingSettings()
+    /// `true` si ya se mostro antes el aviso del sistema; la primera vez no se abren los Ajustes.
+    func hasRequestedScreenRecordingAccess() -> Bool
+}
+
+extension ScreenPermissionChecking {
+    func hasRequestedScreenRecordingAccess() -> Bool {
+        true
+    }
 }
 
 protocol ClipboardWriting {

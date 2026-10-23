@@ -83,7 +83,7 @@ struct MenuBarView: View {
         actionButton(.openHistory)
 
         Button("Abrir carpeta de capturas", systemImage: "folder") {
-            NSWorkspace.shared.open(container.fileStorage.saveFolder)
+            container.fileStorage.openSaveFolder()
         }
 
         Divider()

@@ -55,7 +55,7 @@ nonisolated enum VideoBackgroundCompositor {
         }
         let videoSize = try await track.load(.naturalSize)
         let layout = layout(videoSize: videoSize, style: style, outputScale: outputScale)
-        let background = backgroundImage(layout: layout, style: style)
+        let background = renderedBackground(layout: layout, style: style)
         let mask = roundedRect(layout.contentRect, radius: style.cornerRadius * layout.unit, color: .white)
         let transform = CGAffineTransform(a: outputScale, b: 0, c: 0, d: outputScale, tx: layout.contentRect.minX, ty: layout.contentRect.minY)
         let extent = CGRect(origin: .zero, size: layout.renderSize)
@@ -76,6 +76,16 @@ nonisolated enum VideoBackgroundCompositor {
     }
 
     // MARK: - Private
+
+    /// El fondo no cambia entre fotogramas: se rasteriza una vez (degradado o imagen + sombra desenfocada)
+    /// para no reevaluar la receta de Core Image en cada fotograma de la reproduccion y la exportacion.
+    private static func renderedBackground(layout: Layout, style: VideoBackgroundStyle) -> CIImage {
+        let recipe = backgroundImage(layout: layout, style: style)
+        let extent = CGRect(origin: .zero, size: layout.renderSize)
+        let context = CIContext(options: [.cacheIntermediates: false])
+        guard let cgImage = context.createCGImage(recipe, from: extent) else { return recipe }
+        return CIImage(cgImage: cgImage)
+    }
 
     private static func backgroundImage(layout: Layout, style: VideoBackgroundStyle) -> CIImage {
         let extent = CGRect(origin: .zero, size: layout.renderSize)

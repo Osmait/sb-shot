@@ -109,6 +109,8 @@ nonisolated struct SelectionOptions {
     var freezeScreen = false
     var showsMagnifier = true
     var showsCrosshair = true
+    /// Oculta los iconos del escritorio en la imagen congelada (`freezeScreen`).
+    var hidesDesktopIcons = false
 }
 
 struct SelectionResult {

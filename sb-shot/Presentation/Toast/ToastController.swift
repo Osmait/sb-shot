@@ -5,6 +5,13 @@ import SwiftUI
 final class ToastController: ToastPresenting {
     private var panel: NSPanel?
     private var hideTask: Task<Void, Never>?
+    /// Cambia con cada aviso nuevo, para que el final de un fundido anterior no oculte el actual.
+    private var generation = 0
+
+    /// Hay un aviso en pantalla (o desvaneciendose). Visible para las pruebas.
+    var hasPanel: Bool {
+        panel != nil
+    }
 
     func show(_ message: String, systemImage: String) {
         present(ToastView(message: message, systemImage: systemImage, showsProgress: false))
@@ -19,19 +26,21 @@ final class ToastController: ToastPresenting {
     func hide() {
         hideTask?.cancel()
         guard let panel else { return }
+        let hidingGeneration = generation
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.2
             panel.animator().alphaValue = 0
         } completionHandler: {
             Task { @MainActor [weak self] in
-                guard self?.panel === panel else { return }
+                guard let self, self.panel === panel, generation == hidingGeneration else { return }
                 panel.orderOut(nil)
-                self?.panel = nil
+                self.panel = nil
             }
         }
     }
 
     private func present(_ view: ToastView) {
+        generation += 1
         let hosting = NSHostingView(rootView: view)
         let size = hosting.fittingSize
 
@@ -51,8 +60,12 @@ final class ToastController: ToastPresenting {
                 panel.animator().alphaValue = 1
             }
         } else {
-            panel.alphaValue = 1
             panel.orderFrontRegardless()
+            // Reemplaza un posible fundido de salida en curso.
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.1
+                panel.animator().alphaValue = 1
+            }
         }
         self.panel = panel
     }

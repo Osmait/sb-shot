@@ -12,6 +12,39 @@ struct HistoryEntry: Codable, Identifiable, Equatable {
     let fileName: String
     let kind: Kind
     let createdAt: Date
+
+    init(id: UUID, fileName: String, kind: Kind, createdAt: Date) {
+        self.id = id
+        self.fileName = fileName
+        self.kind = kind
+        self.createdAt = createdAt
+    }
+
+    /// Solo `fileName` es imprescindible; el resto se deduce si falta o no se reconoce.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        fileName = try container.decode(String.self, forKey: .fileName)
+        id = (try? container.decodeIfPresent(UUID.self, forKey: .id)) ?? UUID()
+        kind = (try? container.decodeIfPresent(Kind.self, forKey: .kind)) ?? Self.kind(forExtension: (fileName as NSString).pathExtension)
+        createdAt = (try? container.decodeIfPresent(Date.self, forKey: .createdAt)) ?? .distantPast
+    }
+
+    private static func kind(forExtension ext: String) -> Kind {
+        switch ext.lowercased() {
+        case "mp4", "mov", "m4v": .video
+        case "gif": .gif
+        default: .image
+        }
+    }
+}
+
+/// Decodifica cada entrada por separado para que una entrada danada no invalide todo el indice.
+private struct LossyHistoryEntry: Decodable {
+    let entry: HistoryEntry?
+
+    init(from decoder: Decoder) throws {
+        entry = try? HistoryEntry(from: decoder)
+    }
 }
 
 /// Guarda una copia de cada captura y grabacion en Application Support para el historial.
@@ -22,15 +55,17 @@ final class HistoryStore: ObservableObject {
     let directory: URL
     private let indexURL: URL
     private let limit: Int
+    /// Falso si el indice no se pudo leer ni respaldar: no se sobrescribe para no perder las entradas.
+    private var canPersist = true
 
-    init(limit: Int = 100) {
+    init(limit: Int = 100, directory: URL? = nil) {
         self.limit = limit
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        directory = support.appendingPathComponent("sb-shot/History", isDirectory: true)
-        indexURL = directory.appendingPathComponent("index.json")
+        self.directory = directory ?? support.appendingPathComponent("sb-shot/History", isDirectory: true)
+        indexURL = self.directory.appendingPathComponent("index.json")
 
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true)
         load()
     }
 
@@ -77,16 +112,46 @@ final class HistoryStore: ObservableObject {
     }
 
     private func load() {
-        guard
-            let data = try? Data(contentsOf: indexURL),
-            let decoded = try? JSONDecoder().decode([HistoryEntry].self, from: data)
-        else { return }
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: indexURL.path) else { return }
 
-        entries = decoded.filter { FileManager.default.fileExists(atPath: url(for: $0).path) }
+        do {
+            let data = try Data(contentsOf: indexURL)
+            let decoded = try JSONDecoder().decode([LossyHistoryEntry].self, from: data).compactMap(\.entry)
+            entries = decoded.filter { manager.fileExists(atPath: url(for: $0).path) }
+            removeOrphanedFiles()
+        } catch {
+            backUpIndex()
+        }
+    }
+
+    /// Guarda el indice ilegible como `.bak` antes de que el siguiente `persist()` lo sobrescriba.
+    private func backUpIndex() {
+        var backup = directory.appendingPathComponent("index.json.bak")
+        if FileManager.default.fileExists(atPath: backup.path) {
+            backup = directory.appendingPathComponent("index-\(Int(Date().timeIntervalSince1970)).json.bak")
+        }
+        do {
+            try FileManager.default.moveItem(at: indexURL, to: backup)
+        } catch {
+            canPersist = false
+        }
+    }
+
+    /// Borra archivos que ningun indice referencia. No se hace si hay respaldos, porque sus
+    /// archivos solo estan referenciados ahi.
+    private func removeOrphanedFiles() {
+        guard let contents = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isRegularFileKey], options: .skipsHiddenFiles), !contents.contains(where: { $0.pathExtension == "bak" }) else { return }
+
+        let referenced = Set(entries.map(\.fileName))
+        for url in contents where url.lastPathComponent != indexURL.lastPathComponent && !referenced.contains(url.lastPathComponent) {
+            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     private func persist() {
-        guard let data = try? JSONEncoder().encode(entries) else { return }
+        guard canPersist, let data = try? JSONEncoder().encode(entries) else { return }
         try? data.write(to: indexURL, options: .atomic)
     }
 }

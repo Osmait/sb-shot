@@ -1,6 +1,8 @@
 import AppKit
 
 struct QuickAccessActions {
+    /// Archivo actual para arrastrar (la copia guardada, si ya se guardo).
+    let fileURL: () -> URL
     let onCopy: () -> Void
     let onSave: () -> Void
     let onEdit: () -> Void

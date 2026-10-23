@@ -49,20 +49,28 @@ struct EditorCanvasView: View {
     private func drawDocument(in context: GraphicsContext, layout: RenderLayout, transform: CanvasTransform) {
         guard let sources = viewModel.previewSources else { return }
 
-        var shadowContext = context
-        shadowContext.addFilter(.shadow(color: .black.opacity(layout.background == nil ? 0.45 : 0), radius: 18, y: 4))
-        shadowContext.fill(Path(transform.toView(CGRect(origin: .zero, size: layout.outputSize))), with: .color(.black))
+        let document = viewModel.displayDocument
+        let excludedID = viewModel.editingTextID
+        let renderer = viewModel.renderer
+        let drawContent = { (target: GraphicsContext) in
+            target.withCGContext { cgContext in
+                cgContext.translateBy(x: transform.origin.x, y: transform.origin.y)
+                cgContext.scaleBy(x: transform.scale, y: transform.scale)
+                renderer.draw(document: document, layout: layout, sources: sources, in: cgContext, excludingAnnotationID: excludedID)
+            }
+        }
 
-        context.withCGContext { cgContext in
-            cgContext.translateBy(x: transform.origin.x, y: transform.origin.y)
-            cgContext.scaleBy(x: transform.scale, y: transform.scale)
-            viewModel.renderer.draw(
-                document: viewModel.displayDocument,
-                layout: layout,
-                sources: sources,
-                in: cgContext,
-                excludingAnnotationID: viewModel.editingTextID
-            )
+        guard layout.background == nil else {
+            drawContent(context)
+            return
+        }
+
+        // Sin fondo la sombra sale del alfa del contenido, asi las zonas transparentes (sombra de una ventana,
+        // esquinas redondeadas) se ven como en la imagen exportada en vez de sobre un rectangulo negro.
+        var shadowContext = context
+        shadowContext.addFilter(.shadow(color: .black.opacity(0.45), radius: 18, y: 4))
+        shadowContext.drawLayer { layer in
+            drawContent(layer)
         }
     }
 

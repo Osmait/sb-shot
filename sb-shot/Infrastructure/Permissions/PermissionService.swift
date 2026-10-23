@@ -6,8 +6,15 @@ struct PermissionService {
         CGPreflightScreenCaptureAccess()
     }
 
+    private static let requestedKey = "didRequestScreenRecordingAccess"
+
     func requestScreenRecordingAccess() -> Bool {
-        CGRequestScreenCaptureAccess()
+        UserDefaults.standard.set(true, forKey: Self.requestedKey)
+        return CGRequestScreenCaptureAccess()
+    }
+
+    func hasRequestedScreenRecordingAccess() -> Bool {
+        UserDefaults.standard.bool(forKey: Self.requestedKey)
     }
 
     func openScreenRecordingSettings() {

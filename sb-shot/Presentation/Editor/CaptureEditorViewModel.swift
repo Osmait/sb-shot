@@ -20,11 +20,11 @@ final class CaptureEditorViewModel: ObservableObject {
     }
 
     @Published var strokeColor: Color = palette[0] {
-        didSet { applyStyleToSelection { $0.color = self.strokeColor } }
+        didSet { applyStyleToSelection(coalesceKey: "color") { $0.color = self.strokeColor } }
     }
 
     @Published var lineWidth: CGFloat = 4 {
-        didSet { applyStyleToSelection { $0.lineWidth = self.lineWidth } }
+        didSet { applyStyleToSelection(coalesceKey: "lineWidth") { $0.lineWidth = self.lineWidth } }
     }
 
     @Published var fillShapes = false {
@@ -32,7 +32,7 @@ final class CaptureEditorViewModel: ObservableObject {
     }
 
     @Published var fontSize: CGFloat = 28 {
-        didSet { applyStyleToSelection { $0.fontSize = self.fontSize } }
+        didSet { applyStyleToSelection(coalesceKey: "fontSize") { $0.fontSize = self.fontSize } }
     }
 
     @Published var textBackground = false {
@@ -40,7 +40,12 @@ final class CaptureEditorViewModel: ObservableObject {
     }
 
     @Published var obfuscation: ObfuscationMode = .pixelate {
-        didSet { applyStyleToSelection { $0.obfuscation = self.obfuscation } }
+        didSet {
+            applyStyleToSelection { $0.obfuscation = self.obfuscation }
+            if activeTool == .obfuscate || selectedAnnotation.map({ Self.tool(for: $0.kind) == .obfuscate }) == true {
+                prepareObfuscation(obfuscation)
+            }
+        }
     }
 
     @Published private(set) var document = EditorDocument()
@@ -63,6 +68,11 @@ final class CaptureEditorViewModel: ObservableObject {
     private var interaction: Interaction?
     private var isSyncingStyle = false
     private var lastCoalescedChange: (key: String, date: Date)?
+    /// Texto recien creado y la pila de rehacer que habia antes, para deshacer su creacion si queda vacio.
+    private var newTextUndo: (id: UUID, snapshot: EditorDocument, redo: [EditorDocument])?
+    /// Ultimo render completo, para reutilizarlo si el documento no cambio (arrastrar, copiar otra vez...).
+    private var renderCache: (document: EditorDocument, image: NSImage)?
+    private var preparedObfuscations: Set<ObfuscationMode> = []
     private var toolBeforeCrop: EditorTool = .arrow
     private var skipCropCommit = false
 
@@ -281,8 +291,12 @@ final class CaptureEditorViewModel: ObservableObject {
     }
 
     func undo() {
-        commitTextEditing()
+        // Si se descarta un texto nuevo vacio, eso ya deshace su creacion.
+        if finishTextEditing() {
+            return
+        }
         guard let previous = undoStack.popLast() else { return }
+        lastCoalescedChange = nil
         redoStack.append(document)
         document = previous
         validateSelection()
@@ -291,36 +305,84 @@ final class CaptureEditorViewModel: ObservableObject {
     func redo() {
         commitTextEditing()
         guard let next = redoStack.popLast() else { return }
+        lastCoalescedChange = nil
         undoStack.append(document)
         document = next
         validateSelection()
     }
 
+    /// Render sincrono, para arrastrar y soltar (que necesita el archivo en el momento). Reutiliza el ultimo render.
     func renderedImage() -> NSImage {
         commitTextEditing()
+        if let renderCache, renderCache.document == document {
+            return renderCache.image
+        }
         guard let sources = exportSources ?? previewSources else { return baseImage }
-        return renderer.render(document: document, sources: sources)
+        let image = renderer.render(document: document, sources: sources)
+        renderCache = (document, image)
+        return image
+    }
+
+    /// Render a resolucion completa fuera del hilo principal.
+    func renderImage() async -> NSImage {
+        commitTextEditing()
+        if let renderCache, renderCache.document == document {
+            return renderCache.image
+        }
+        guard let sources = exportSources ?? previewSources else { return baseImage }
+
+        let document = document
+        let renderer = renderer
+        let output = await Task.detached(priority: .userInitiated) {
+            renderer.renderImage(document: document, sources: sources)
+        }.value
+        guard let output else {
+            return NSImage(cgImage: sources.base, size: sources.pointSize)
+        }
+
+        let image = NSImage(cgImage: output, size: RenderLayout(document: document, imageSize: sources.pointSize).outputSize)
+        renderCache = (document, image)
+        return image
     }
 
     // MARK: - Text
 
     func commitTextEditing() {
-        guard let id = editingTextID else { return }
+        finishTextEditing()
+    }
+
+    /// Termina la edicion de texto. Devuelve `true` si se descarto un texto recien creado y vacio,
+    /// en cuyo caso tambien se quita su paso de deshacer y se recupera la pila de rehacer.
+    @discardableResult
+    private func finishTextEditing() -> Bool {
+        guard let id = editingTextID else { return false }
         editingTextID = nil
+        let newText = newTextUndo
+        newTextUndo = nil
 
         let content = textDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        if content.isEmpty {
-            document.annotations.removeAll { $0.id == id }
-            if selectedID == id {
-                selectedID = nil
-            }
+        guard content.isEmpty else { return false }
+
+        document.annotations.removeAll { $0.id == id }
+        if selectedID == id {
+            selectedID = nil
         }
+
+        // Solo si no hubo otros cambios desde la creacion (por ejemplo, el tamano de letra mientras se escribe).
+        guard let newText, newText.id == id, undoStack.last == newText.snapshot, document == newText.snapshot else { return false }
+        undoStack.removeLast()
+        redoStack = newText.redo
+        lastCoalescedChange = nil
+        return true
     }
 
     private func createText(at point: CGPoint) {
         let annotation = EditorAnnotation(kind: .text(content: "", origin: point), style: currentStyle)
+        let snapshot = document
+        let redo = redoStack
         commit(annotation, selectAfter: true)
         beginEditingText(annotation)
+        newTextUndo = (annotation.id, snapshot, redo)
     }
 
     private func beginEditingText(_ annotation: EditorAnnotation) {
@@ -328,6 +390,7 @@ final class CaptureEditorViewModel: ObservableObject {
         if !content.isEmpty {
             pushUndo(document)
         }
+        newTextUndo = nil
         editingTextID = annotation.id
         textDraft = content
     }
@@ -383,8 +446,8 @@ final class CaptureEditorViewModel: ObservableObject {
         change(&background)
         guard background != document.background else { return }
 
-        if let coalesceKey, shouldCoalesce(key: coalesceKey) {
-            document.background = background
+        if let coalesceKey {
+            coalescingMutate(key: coalesceKey) { $0.background = background }
         } else {
             mutate { $0.background = background }
         }
@@ -408,6 +471,10 @@ final class CaptureEditorViewModel: ObservableObject {
         commitTextEditing()
         interaction = nil
         draft = nil
+
+        if activeTool == .obfuscate {
+            prepareObfuscation(obfuscation)
+        }
 
         if activeTool == .crop {
             toolBeforeCrop = oldValue
@@ -442,25 +509,42 @@ final class CaptureEditorViewModel: ObservableObject {
         isSyncingStyle = false
     }
 
-    private func applyStyleToSelection(_ change: (inout AnnotationStyle) -> Void) {
+    /// `coalesceKey` agrupa los cambios continuos (slider, selector de color); `nil` crea siempre un paso nuevo.
+    private func applyStyleToSelection(coalesceKey: String? = nil, _ change: (inout AnnotationStyle) -> Void) {
         guard !isSyncingStyle, let selectedID, let index = document.annotations.firstIndex(where: { $0.id == selectedID }) else { return }
 
         var style = document.annotations[index].style
         change(&style)
         guard style != document.annotations[index].style else { return }
 
-        if shouldCoalesce(key: "style-\(selectedID)") {
-            document.annotations[index].style = style
+        if let coalesceKey {
+            coalescingMutate(key: "style-\(selectedID)-\(coalesceKey)") { $0.annotations[index].style = style }
         } else {
             mutate { $0.annotations[index].style = style }
         }
     }
 
-    /// Agrupa cambios seguidos (por ejemplo, mover un slider) en un solo paso de deshacer.
-    private func shouldCoalesce(key: String) -> Bool {
-        defer { lastCoalescedChange = (key, Date()) }
-        guard let last = lastCoalescedChange else { return false }
-        return last.key == key && Date().timeIntervalSince(last.date) < 1.0
+    /// Agrupa cambios seguidos con la misma clave (por ejemplo, mover un slider) en un solo paso de deshacer.
+    /// El primero guarda el estado previo; los siguientes, dentro de un segundo del anterior, solo modifican el documento.
+    /// Cualquier otro cambio con paso propio (`pushUndo`), deshacer o rehacer corta el grupo.
+    private func coalescingMutate(key: String, _ change: (inout EditorDocument) -> Void) {
+        if let last = lastCoalescedChange, last.key == key, Date().timeIntervalSince(last.date) < 1.0, !undoStack.isEmpty {
+            change(&document)
+        } else {
+            mutate(change)
+        }
+        lastCoalescedChange = (key, Date())
+    }
+
+    /// Calcula en segundo plano la variante pixelada o desenfocada antes de que haga falta dibujarla.
+    private func prepareObfuscation(_ mode: ObfuscationMode) {
+        guard preparedObfuscations.insert(mode).inserted else { return }
+        let sources = [previewSources, exportSources].compactMap { $0 }
+        Task.detached(priority: .utility) {
+            for source in sources {
+                source.prepare(mode)
+            }
+        }
     }
 
     private func commit(_ annotation: EditorAnnotation, selectAfter: Bool) {

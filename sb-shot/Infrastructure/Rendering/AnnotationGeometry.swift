@@ -1,6 +1,6 @@
 import AppKit
 
-enum AnnotationHandle: Hashable, CaseIterable {
+nonisolated enum AnnotationHandle: Hashable, CaseIterable, Sendable {
     case start
     case end
     case topLeft
@@ -9,7 +9,7 @@ enum AnnotationHandle: Hashable, CaseIterable {
     case bottomRight
 }
 
-enum AnnotationMetrics {
+nonisolated enum AnnotationMetrics {
     static let textPadding = CGSize(width: 10, height: 5)
 
     static func textFont(size: CGFloat) -> NSFont {
@@ -51,7 +51,7 @@ enum AnnotationMetrics {
     }
 }
 
-extension CGRect {
+nonisolated extension CGRect {
     static func spanning(_ a: CGPoint, _ b: CGPoint) -> CGRect {
         CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
     }
@@ -78,7 +78,7 @@ extension CGRect {
     static let cornerHandles: [AnnotationHandle] = [.topLeft, .topRight, .bottomLeft, .bottomRight]
 }
 
-private func distance(from point: CGPoint, toSegment a: CGPoint, _ b: CGPoint) -> CGFloat {
+private nonisolated func distance(from point: CGPoint, toSegment a: CGPoint, _ b: CGPoint) -> CGFloat {
     let dx = b.x - a.x
     let dy = b.y - a.y
     let lengthSquared = dx * dx + dy * dy
@@ -88,7 +88,7 @@ private func distance(from point: CGPoint, toSegment a: CGPoint, _ b: CGPoint) -
     return hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy))
 }
 
-private func distance(from point: CGPoint, toPolyline points: [CGPoint]) -> CGFloat {
+private nonisolated func distance(from point: CGPoint, toPolyline points: [CGPoint]) -> CGFloat {
     guard let first = points.first else { return .infinity }
     guard points.count > 1 else { return hypot(point.x - first.x, point.y - first.y) }
     return zip(points, points.dropFirst())
@@ -96,7 +96,7 @@ private func distance(from point: CGPoint, toPolyline points: [CGPoint]) -> CGFl
         .min() ?? .infinity
 }
 
-extension EditorAnnotation {
+nonisolated extension EditorAnnotation {
     var bounds: CGRect {
         switch kind {
         case let .line(start, end), let .arrow(start, end):

@@ -1,6 +1,6 @@
 import CoreGraphics
 
-struct ArrowHead {
+nonisolated struct ArrowHead {
     let tip: CGPoint
     let left: CGPoint
     let right: CGPoint
