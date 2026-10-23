@@ -79,7 +79,7 @@ final class CaptureOutputHandler {
         var item: CaptureItem
         if settings.recordingFormat == .gif {
             toast.showProgress("Creando GIF…")
-            guard let gifURL = await makeGIF(from: sourceURL, range: nil) else {
+            guard let gifURL = await makeGIF(from: sourceURL) else {
                 toast.show("No se pudo crear el GIF", systemImage: "exclamationmark.triangle")
                 return
             }
@@ -170,14 +170,14 @@ final class CaptureOutputHandler {
         videoEditor.show(videoURL: url, actions: VideoEditorActions(
             onCopy: { [weak self] url in
                 self?.clipboard.copy(fileURL: url)
-                self?.toast.show("Video copiado", systemImage: "doc.on.clipboard.fill")
+                self?.toast.show("Copiado", systemImage: "doc.on.clipboard.fill")
             },
             onSave: { [weak self] url in
-                self?.saveToFolder(url, announce: true)
+                guard let self, saveToFolder(url, announce: true) != nil, settings.keepHistory else { return }
+                history.add(fileURL: url, kind: url.pathExtension.lowercased() == "gif" ? .gif : .video)
             },
-            onExportGIF: { [weak self] url, range in
-                Task { await self?.exportGIF(from: url, range: range) }
-            }
+            defaultFormat: settings.recordingFormat,
+            gifFramesPerSecond: settings.gifFPS
         ))
     }
 
@@ -229,39 +229,13 @@ final class CaptureOutputHandler {
         ))
     }
 
-    private func exportGIF(from url: URL, range: CMTimeRangeValue?) async {
-        toast.showProgress("Creando GIF…")
-        guard let gifURL = await makeGIF(from: url, range: range) else {
-            toast.show("No se pudo crear el GIF", systemImage: "exclamationmark.triangle")
-            return
-        }
-        toast.hide()
-
-        let thumbnail = await VideoExporter.thumbnail(for: url) ?? NSWorkspace.shared.icon(for: .gif)
-        var item = CaptureItem(content: .gif(gifURL), thumbnail: thumbnail, fileURL: gifURL)
-        if let saved = saveToFolder(gifURL, announce: false) {
-            item.fileURL = saved
-        }
-        if settings.keepHistory {
-            history.add(fileURL: gifURL, kind: .gif)
-        }
-        showQuickAccess(item)
-    }
-
-    private func makeGIF(from url: URL, range: CMTimeRangeValue?) async -> URL? {
+    private func makeGIF(from url: URL) async -> URL? {
         let output = files.temporaryURL(prefix: settings.fileNamePrefix, fileExtension: "gif")
-        let timeRange = range.map {
-            CMTimeRange(
-                start: CMTime(seconds: $0.start, preferredTimescale: 600),
-                duration: CMTime(seconds: $0.duration, preferredTimescale: 600)
-            )
-        }
         return try? await GifExporter.export(
             videoURL: url,
             to: output,
             framesPerSecond: settings.gifFPS,
-            maxWidth: settings.gifMaxWidth,
-            timeRange: timeRange
+            maxWidth: settings.gifMaxWidth
         )
     }
 

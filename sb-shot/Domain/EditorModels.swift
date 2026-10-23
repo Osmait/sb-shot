@@ -160,12 +160,43 @@ struct BackgroundPreset: Identifiable {
     ]
 }
 
+enum BackgroundAspect: String, CaseIterable, Identifiable {
+    case auto
+    case wide
+    case standard
+    case square
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .auto: "Auto"
+        case .wide: "16:9"
+        case .standard: "4:3"
+        case .square: "1:1"
+        }
+    }
+
+    /// Ancho / alto, o `nil` para ajustarse al contenido.
+    var ratio: CGFloat? {
+        switch self {
+        case .auto: nil
+        case .wide: 16.0 / 9.0
+        case .standard: 4.0 / 3.0
+        case .square: 1
+        }
+    }
+}
+
 struct BackgroundSettings: Equatable {
     var isEnabled = false
     var presetIndex = 0
     var padding: CGFloat = 64
     var cornerRadius: CGFloat = 12
     var shadow = true
+    var aspect: BackgroundAspect = .auto
 
     var preset: BackgroundPreset {
         BackgroundPreset.all[min(max(presetIndex, 0), BackgroundPreset.all.count - 1)]

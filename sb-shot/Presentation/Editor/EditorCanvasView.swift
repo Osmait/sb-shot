@@ -29,6 +29,14 @@ struct EditorCanvasView: View {
                 if let annotation = viewModel.editingAnnotation {
                     textEditor(for: annotation, layout: layout, transform: transform)
                 }
+
+                Text(verbatim: "\(Int((transform.scale * 100).rounded()))%  ·  \(Int(viewModel.outputPixelSize.width)) × \(Int(viewModel.outputPixelSize.height)) px")
+                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 16)
+                    .padding(.bottom, 12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .allowsHitTesting(false)
             }
             .contentShape(Rectangle())
             .gesture(pointerGesture(layout: layout, transform: transform))
@@ -114,7 +122,7 @@ struct EditorCanvasView: View {
         }
 
         if let draft = viewModel.cropDraft {
-            let label = Text("\(Int(draft.width)) × \(Int(draft.height))")
+            let label = Text(verbatim: "\(Int(draft.width)) × \(Int(draft.height))")
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundColor(.white)
             context.draw(label, at: CGPoint(x: cropRect.midX, y: cropRect.maxY + 14))

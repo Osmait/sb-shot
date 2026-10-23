@@ -52,7 +52,6 @@ final class CaptureEditorViewModel: ObservableObject {
     }
 
     @Published var cropDraft: CGRect?
-    @Published var showsBackgroundPanel = false
 
     let baseImage: NSImage
     let previewSources: RenderSources?

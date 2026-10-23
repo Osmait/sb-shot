@@ -185,11 +185,12 @@ private struct CaptureEditorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            EditorToolbar(viewModel: viewModel)
+            EditorTopBar(viewModel: viewModel, onCopy: onCopy, onSave: onSave, onPin: onPin, dragFile: dragFile)
                 .padding(.leading, 84)
                 .padding(.trailing, 12)
                 .frame(height: 52)
                 .background(WindowDragArea())
+                .background(EditorColors.toolbarBackground)
 
             Divider().overlay(EditorColors.groupBorder)
 
@@ -197,250 +198,213 @@ private struct CaptureEditorView: View {
                 EditorCanvasView(viewModel: viewModel)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                if viewModel.showsBackgroundPanel {
-                    Divider().overlay(EditorColors.groupBorder)
-                    BackgroundInspector(viewModel: viewModel)
-                        .frame(width: 250)
-                        .transition(.move(edge: .trailing))
-                }
+                Divider().overlay(EditorColors.groupBorder)
+
+                EditorInspector(viewModel: viewModel)
+                    .frame(width: 288)
             }
-
-            Divider().overlay(EditorColors.groupBorder)
-
-            bottomBar
-                .padding(.horizontal, 12)
-                .frame(height: 48)
         }
         .background(EditorColors.windowBackground)
         .ignoresSafeArea(.container, edges: .top)
-        .animation(.easeInOut(duration: 0.2), value: viewModel.showsBackgroundPanel)
     }
+}
 
-    private var bottomBar: some View {
-        HStack(spacing: 8) {
-            Button {
-                viewModel.showsBackgroundPanel.toggle()
-            } label: {
-                Label("Fondo", systemImage: "square.on.square.squareshape.controlhandles")
-            }
-            .buttonStyle(ActionButtonStyle(isPrimary: false, isActive: viewModel.showsBackgroundPanel))
-            .help("Agregar fondo, margen y sombra")
+// MARK: - Top bar
 
-            Button {
-                viewModel.clear()
-            } label: {
-                Label("Limpiar", systemImage: "trash")
-            }
-            .buttonStyle(ActionButtonStyle(isPrimary: false))
-            .disabled(viewModel.document.annotations.isEmpty)
+private struct EditorTopBar: View {
+    @ObservedObject var viewModel: CaptureEditorViewModel
+    let onCopy: () -> Void
+    let onSave: () -> Void
+    let onPin: () -> Void
+    let dragFile: () -> URL?
 
-            Spacer()
+    private static let annotateTools: [EditorTool] = [.select, .arrow, .line, .rectangle, .ellipse, .text, .counter]
+    private static let effectTools: [EditorTool] = [.pencil, .highlighter, .obfuscate, .spotlight, .crop]
 
-            Text("\(Int(viewModel.outputPixelSize.width)) × \(Int(viewModel.outputPixelSize.height)) px")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(.secondary)
+    var body: some View {
+        HStack(spacing: 12) {
+            toolGroup(Self.annotateTools)
+            toolGroup(Self.effectTools)
 
-            Spacer()
+            Spacer(minLength: 0)
+
+            iconButton("arrow.uturn.backward", help: "Deshacer (⌘Z)", enabled: viewModel.canUndo, action: viewModel.undo)
+            iconButton("arrow.uturn.forward", help: "Rehacer (⇧⌘Z)", enabled: viewModel.canRedo, action: viewModel.redo)
 
             DragChip(dragFile: dragFile)
-
-            Button(action: onPin) {
-                Image(systemName: "pin")
-            }
-            .buttonStyle(ActionButtonStyle(isPrimary: false))
-            .help("Fijar en pantalla (⌘P)")
+            iconButton("pin", help: "Fijar en pantalla (⌘P)", enabled: true, action: onPin)
 
             Button("Guardar", action: onSave)
                 .buttonStyle(ActionButtonStyle(isPrimary: false))
                 .help("Guardar en la carpeta de capturas (⌘S) · Guardar como (⇧⌘S)")
 
-            Button(action: onCopy) {
-                Label("Copiar", systemImage: "doc.on.doc")
-            }
-            .buttonStyle(ActionButtonStyle())
-            .help("Copiar al portapapeles (⌘C)")
-        }
-    }
-}
-
-/// Chip que se arrastra para soltar la imagen editada en otra app.
-private struct DragChip: View {
-    let dragFile: () -> URL?
-
-    var body: some View {
-        ZStack {
-            Label("Arrastrar", systemImage: "hand.draw")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
-                .frame(height: 28)
-                .background(EditorColors.hoverFill, in: RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(EditorColors.groupBorder, style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
-
-            FileDragSource(fileURL: dragFile, previewImage: nil)
-        }
-        .fixedSize()
-        .help("Arrastra la captura a otra app")
-    }
-}
-
-// MARK: - Toolbar
-
-private struct EditorToolbar: View {
-    @ObservedObject var viewModel: CaptureEditorViewModel
-
-    var body: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 2) {
-                ForEach(EditorTool.allCases) { tool in
-                    ToolButton(icon: tool.iconName, isSelected: viewModel.activeTool == tool) {
-                        viewModel.activeTool = tool
-                    }
-                    .help("\(tool.title) (\(String(tool.shortcutKey).uppercased()))")
-                }
-            }
-            .toolbarGroup()
-
-            if viewModel.isCropping {
-                cropControls
-            } else {
-                StyleControls(viewModel: viewModel, tool: viewModel.styleTool)
-            }
-
-            Spacer(minLength: 0)
-
-            HStack(spacing: 2) {
-                iconButton("arrow.uturn.backward", help: "Deshacer (⌘Z)", enabled: viewModel.canUndo, action: viewModel.undo)
-                iconButton("arrow.uturn.forward", help: "Rehacer (⇧⌘Z)", enabled: viewModel.canRedo, action: viewModel.redo)
-            }
-            .toolbarGroup()
-        }
-    }
-
-    private var cropControls: some View {
-        HStack(spacing: 6) {
-            Button("Restablecer", action: viewModel.resetCrop)
-                .buttonStyle(ActionButtonStyle(isPrimary: false))
-            Button("Cancelar", action: viewModel.cancelCrop)
-                .buttonStyle(ActionButtonStyle(isPrimary: false))
-            Button("Aplicar", action: viewModel.confirmCrop)
+            Button("Copiar", action: onCopy)
                 .buttonStyle(ActionButtonStyle())
+                .help("Copiar al portapapeles (⌘C)")
         }
-        .toolbarGroup()
+    }
+
+    private func toolGroup(_ tools: [EditorTool]) -> some View {
+        HStack(spacing: 2) {
+            ForEach(tools) { tool in
+                ToolButton(icon: tool.iconName, isSelected: viewModel.activeTool == tool) {
+                    viewModel.activeTool = tool
+                }
+                .help("\(tool.title) (\(String(tool.shortcutKey).uppercased()))")
+            }
+        }
+        .padding(3)
+        .background(EditorColors.groupBackground, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(EditorColors.groupBorder, lineWidth: 1))
     }
 
     private func iconButton(_ systemName: String, help: String, enabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 12, weight: .medium))
-                .frame(width: 28, height: 26)
+                .font(.system(size: 13, weight: .medium))
+                .frame(width: 30, height: 30)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(enabled ? .white : .white.opacity(0.25))
+        .foregroundStyle(enabled ? Color.white : Color.white.opacity(0.25))
         .disabled(!enabled)
         .help(help)
     }
 }
 
-private struct StyleControls: View {
-    @ObservedObject var viewModel: CaptureEditorViewModel
-    let tool: EditorTool
+/// Icono que se arrastra para soltar la imagen editada en otra app.
+private struct DragChip: View {
+    let dragFile: () -> URL?
 
     var body: some View {
-        HStack(spacing: 8) {
+        ZStack {
+            Image(systemName: "hand.draw")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.white.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
+
+            FileDragSource(fileURL: dragFile, previewImage: nil)
+        }
+        .frame(width: 30, height: 30)
+        .help("Arrastra la captura a otra app")
+    }
+}
+
+// MARK: - Inspector
+
+private struct EditorInspector: View {
+    @ObservedObject var viewModel: CaptureEditorViewModel
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                if viewModel.isCropping {
+                    CropSection(viewModel: viewModel)
+                } else {
+                    StyleSection(viewModel: viewModel)
+                }
+
+                Rectangle()
+                    .fill(EditorColors.groupBorder)
+                    .frame(height: 1)
+
+                BackgroundSection(viewModel: viewModel)
+            }
+            .padding(18)
+        }
+        .scrollIndicators(.never)
+        .background(EditorColors.inspectorBackground)
+    }
+}
+
+private struct StyleSection: View {
+    @ObservedObject var viewModel: CaptureEditorViewModel
+
+    private var tool: EditorTool {
+        viewModel.styleTool
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            InspectorTitle(viewModel.selectedAnnotation == nil ? "Herramienta · \(tool.title)" : "Selección · \(tool.title)")
+
+            if tool == .select, viewModel.selectedAnnotation == nil {
+                Text("Haz clic en una anotación para editarla. Arrástrala para moverla y usa los puntos para cambiar su tamaño.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if tool.usesColor {
-                ColorSwatches(selection: $viewModel.strokeColor)
+                ColorGrid(selection: $viewModel.strokeColor)
             }
 
             if tool.usesStrokeWidth {
-                compactSlider(icon: "lineweight", value: $viewModel.lineWidth, range: 1 ... 16, help: "Grosor")
+                InspectorSlider(title: "Grosor", value: $viewModel.lineWidth, range: 1 ... 16)
             }
 
             if tool == .rectangle || tool == .ellipse {
-                ToolButton(icon: viewModel.fillShapes ? "square.fill" : "square", isSelected: viewModel.fillShapes) {
-                    viewModel.fillShapes.toggle()
-                }
-                .help("Relleno")
+                ChipRow(options: [false, true], selection: $viewModel.fillShapes) { $0 ? "Relleno" : "Contorno" }
             }
 
             if tool == .text {
-                compactSlider(icon: "textformat.size", value: $viewModel.fontSize, range: 12 ... 120, help: "Tamaño de texto")
-                ToolButton(icon: "character.textbox", isSelected: viewModel.textBackground) {
-                    viewModel.textBackground.toggle()
-                }
-                .help("Texto con fondo")
+                InspectorSlider(title: "Tamaño", value: $viewModel.fontSize, range: 12 ... 120)
+                ChipRow(options: [false, true], selection: $viewModel.textBackground) { $0 ? "Con fondo" : "Simple" }
             }
 
             if tool == .obfuscate {
-                Picker("", selection: $viewModel.obfuscation) {
-                    ForEach(ObfuscationMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 180)
+                ChipRow(options: ObfuscationMode.allCases, selection: $viewModel.obfuscation) { $0.title }
             }
 
-            if tool == .select, viewModel.selectedAnnotation == nil {
-                Text("Clic para seleccionar · Arrastra para mover · ⌫ para borrar")
-                    .font(.system(size: 11))
+            if tool == .spotlight {
+                Text("Oscurece todo menos las zonas que marques.")
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
-        }
-        .toolbarGroup()
-        .fixedSize()
-    }
 
-    private func compactSlider(icon: String, value: Binding<CGFloat>, range: ClosedRange<CGFloat>, help: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-            Slider(value: value, in: range)
-                .controlSize(.small)
-                .frame(width: 80)
+            if viewModel.selectedAnnotation != nil {
+                Button(role: .destructive, action: viewModel.deleteSelection) {
+                    Label("Eliminar", systemImage: "trash")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(ActionButtonStyle(isPrimary: false))
+                .help("Eliminar (⌫)")
+            }
         }
-        .help(help)
     }
 }
 
-private struct ColorSwatches: View {
-    @Binding var selection: Color
+private struct CropSection: View {
+    @ObservedObject var viewModel: CaptureEditorViewModel
 
     var body: some View {
-        HStack(spacing: 5) {
-            ForEach(Array(CaptureEditorViewModel.palette.enumerated()), id: \.offset) { _, color in
-                Button {
-                    selection = color
-                } label: {
-                    Circle()
-                        .fill(color)
-                        .frame(width: 16, height: 16)
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1))
-                        .overlay(
-                            Circle()
-                                .strokeBorder(Color.white, lineWidth: 2)
-                                .padding(-3)
-                                .opacity(selection == color ? 1 : 0)
-                        )
-                }
-                .buttonStyle(.plain)
+        VStack(alignment: .leading, spacing: 14) {
+            InspectorTitle("Recorte")
+
+            Text("Arrastra sobre la imagen o mueve las esquinas. Enter aplica y Esc cancela.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let draft = viewModel.cropDraft {
+                Text(verbatim: "\(Int(draft.width)) × \(Int(draft.height))")
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
             }
 
-            ColorPicker("", selection: $selection, supportsOpacity: false)
-                .labelsHidden()
-                .frame(width: 22)
-                .help("Otro color")
+            HStack(spacing: 6) {
+                Button("Restablecer", action: viewModel.resetCrop)
+                    .buttonStyle(ActionButtonStyle(isPrimary: false))
+                Button("Cancelar", action: viewModel.cancelCrop)
+                    .buttonStyle(ActionButtonStyle(isPrimary: false))
+                Button("Aplicar", action: viewModel.confirmCrop)
+                    .buttonStyle(ActionButtonStyle())
+            }
         }
-        .padding(.horizontal, 2)
     }
 }
 
-// MARK: - Background inspector
-
-private struct BackgroundInspector: View {
+private struct BackgroundSection: View {
     @ObservedObject var viewModel: CaptureEditorViewModel
 
     private var background: BackgroundSettings {
@@ -448,97 +412,135 @@ private struct BackgroundInspector: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Toggle(isOn: Binding(
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                InspectorTitle("Fondo")
+                Spacer()
+                Toggle("Fondo", isOn: Binding(
                     get: { background.isEnabled },
                     set: { value in viewModel.updateBackground { $0.isEnabled = value } }
-                )) {
-                    Text("Fondo")
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .toggleStyle(.switch)
-                .controlSize(.small)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    sectionTitle("Estilo")
-                    LazyVGrid(columns: Array(repeating: GridItem(.fixed(48), spacing: 8), count: 4), spacing: 8) {
-                        ForEach(BackgroundPreset.all) { preset in
-                            Button {
-                                viewModel.updateBackground {
-                                    $0.presetIndex = preset.id
-                                    $0.isEnabled = true
-                                }
-                            } label: {
-                                RoundedRectangle(cornerRadius: 7)
-                                    .fill(LinearGradient(colors: preset.colors, startPoint: .topLeading, endPoint: .bottomTrailing))
-                                    .frame(width: 48, height: 34)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 7)
-                                            .strokeBorder(Color.white, lineWidth: 2)
-                                            .opacity(background.isEnabled && background.presetIndex == preset.id ? 1 : 0)
-                                    )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-
-                slider("Margen", value: background.padding, range: 0 ... 200, key: "padding") { $0.padding = $1 }
-                slider("Esquinas", value: background.cornerRadius, range: 0 ... 40, key: "radius") { $0.cornerRadius = $1 }
-
-                Toggle("Sombra", isOn: Binding(
-                    get: { background.shadow },
-                    set: { value in viewModel.updateBackground { $0.shadow = value } }
                 ))
+                .labelsHidden()
                 .toggleStyle(.switch)
-                .controlSize(.small)
-
-                Text("El fondo se aplica al copiar, guardar o arrastrar la captura.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                .controlSize(.mini)
             }
-            .padding(16)
-            .disabled(false)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+                ForEach(BackgroundPreset.all) { preset in
+                    Button {
+                        viewModel.updateBackground {
+                            $0.presetIndex = preset.id
+                            $0.isEnabled = true
+                        }
+                    } label: {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(LinearGradient(colors: preset.colors, startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(height: 40)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(Color.white, lineWidth: 2)
+                                    .opacity(background.isEnabled && background.presetIndex == preset.id ? 1 : 0)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            InspectorSlider(title: "Margen", value: backgroundBinding(\.padding, key: "padding"), range: 0 ... 200)
+            InspectorSlider(title: "Esquinas", value: backgroundBinding(\.cornerRadius, key: "radius"), range: 0 ... 40)
+
+            Toggle(isOn: Binding(
+                get: { background.shadow },
+                set: { value in viewModel.updateBackground { $0.shadow = value } }
+            )) {
+                Text("Sombra").font(.system(size: 12))
+            }
+            .toggleStyle(.checkbox)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Proporción")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                ChipRow(
+                    options: BackgroundAspect.allCases,
+                    selection: Binding(
+                        get: { background.aspect },
+                        set: { value in
+                            viewModel.updateBackground {
+                                $0.aspect = value
+                                $0.isEnabled = true
+                            }
+                        }
+                    )
+                ) { $0.title }
+            }
         }
-        .background(EditorColors.panelBackground)
+        .opacity(viewModel.isCropping ? 0.5 : 1)
+        .disabled(viewModel.isCropping)
     }
 
-    private func sectionTitle(_ title: String) -> some View {
-        Text(title.uppercased())
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(.secondary)
+    private func backgroundBinding(_ keyPath: WritableKeyPath<BackgroundSettings, CGFloat>, key: String) -> Binding<CGFloat> {
+        Binding(
+            get: { background[keyPath: keyPath] },
+            set: { value in
+                viewModel.updateBackground(coalesceKey: key) {
+                    $0[keyPath: keyPath] = value
+                    $0.isEnabled = true
+                }
+            }
+        )
     }
+}
 
-    private func slider(
-        _ title: String,
-        value: CGFloat,
-        range: ClosedRange<CGFloat>,
-        key: String,
-        apply: @escaping (inout BackgroundSettings, CGFloat) -> Void
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+// MARK: - Inspector controls
+
+private struct InspectorSlider: View {
+    let title: String
+    @Binding var value: CGFloat
+    let range: ClosedRange<CGFloat>
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
-                sectionTitle(title)
+                Text(title)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
                 Spacer()
-                Text("\(Int(value))")
+                Text(verbatim: "\(Int(value))")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
-            Slider(
-                value: Binding(
-                    get: { value },
-                    set: { newValue in
-                        viewModel.updateBackground(coalesceKey: key) {
-                            apply(&$0, newValue)
-                            $0.isEnabled = true
-                        }
+            Slider(value: $value, in: range)
+                .controlSize(.small)
+        }
+    }
+}
+
+private struct ColorGrid: View {
+    @Binding var selection: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 8), spacing: 6) {
+                ForEach(Array(CaptureEditorViewModel.palette.enumerated()), id: \.offset) { _, color in
+                    Button {
+                        selection = color
+                    } label: {
+                        Circle()
+                            .fill(color)
+                            .frame(width: 24, height: 24)
+                            .overlay(Circle().strokeBorder(Color.white.opacity(0.2), lineWidth: 1))
+                            .overlay(Circle().strokeBorder(Color.white, lineWidth: 2).opacity(selection == color ? 1 : 0))
                     }
-                ),
-                in: range
-            )
-            .controlSize(.small)
+                    .buttonStyle(.plain)
+                }
+            }
+
+            HStack(spacing: 8) {
+                ColorPicker("Otro color", selection: $selection, supportsOpacity: false)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

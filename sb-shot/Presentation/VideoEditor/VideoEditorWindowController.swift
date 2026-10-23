@@ -3,17 +3,18 @@ import AVKit
 import Combine
 import SwiftUI
 
-/// Reproduce una grabacion y permite recortarla, quitarle el audio y exportarla a MP4 o GIF.
+/// Recorta una grabacion con una barra de fotogramas y la exporta a MP4 o GIF desde un panel lateral.
 final class VideoEditorWindowController: NSWindowController, NSWindowDelegate {
     var onClose: (() -> Void)?
 
     private let model: VideoEditorModel
+    private var keyMonitor: Any?
 
     init(videoURL: URL, actions: VideoEditorActions) {
         model = VideoEditorModel(videoURL: videoURL, actions: actions)
 
         let window = NSWindow(
-            contentRect: CGRect(x: 0, y: 0, width: 960, height: 640),
+            contentRect: CGRect(x: 0, y: 0, width: 1200, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -23,7 +24,7 @@ final class VideoEditorWindowController: NSWindowController, NSWindowDelegate {
         window.title = "Editar grabación"
         window.appearance = NSAppearance(named: .darkAqua)
         window.backgroundColor = NSColor(EditorColors.windowBackground)
-        window.minSize = NSSize(width: 640, height: 420)
+        window.minSize = NSSize(width: 900, height: 560)
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
 
@@ -42,11 +43,68 @@ final class VideoEditorWindowController: NSWindowController, NSWindowDelegate {
         window?.center()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+        installKeyMonitor()
     }
 
     func windowWillClose(_: Notification) {
-        model.player.pause()
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
+        }
+        model.tearDown()
         onClose?()
+    }
+
+    /// Espacio reproduce o pausa; I y O fijan el inicio y el fin en la posicion actual.
+    private func installKeyMonitor() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, let window, event.window === window, !(window.firstResponder is NSTextView) else { return event }
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard flags.subtracting(.shift).isEmpty else { return event }
+
+            switch event.charactersIgnoringModifiers?.lowercased() {
+            case " ": model.togglePlayback()
+            case "i": model.setTrimStart(model.currentTime)
+            case "o": model.setTrimEnd(model.currentTime)
+            default: return event
+            }
+            return nil
+        }
+    }
+}
+
+// MARK: - Model
+
+private enum VideoQuality: CaseIterable {
+    case small
+    case medium
+    case original
+
+    func title(for format: RecordingFormat) -> String {
+        switch (format, self) {
+        case (.mp4, .small): "720p"
+        case (.mp4, .medium): "1080p"
+        case (.mp4, .original): "Original"
+        case (.gif, .small): "480 px"
+        case (.gif, .medium): "720 px"
+        case (.gif, .original): "960 px"
+        }
+    }
+
+    var maxVideoHeight: CGFloat? {
+        switch self {
+        case .small: 720
+        case .medium: 1080
+        case .original: nil
+        }
+    }
+
+    var gifWidth: CGFloat {
+        switch self {
+        case .small: 480
+        case .medium: 720
+        case .original: 960
+        }
     }
 }
 
@@ -55,64 +113,174 @@ private final class VideoEditorModel: ObservableObject {
     let videoURL: URL
     let player: AVPlayer
     let actions: VideoEditorActions
-    weak var playerView: AVPlayerView?
 
-    @Published var removeAudio = false
-    @Published var isExporting = false
-    @Published var trimDescription: String?
+    @Published private(set) var duration: Double = 0
+    @Published private(set) var trimStart: Double = 0
+    @Published private(set) var trimEnd: Double = 0
+    @Published private(set) var currentTime: Double = 0
+    @Published private(set) var isPlaying = false
+    @Published private(set) var thumbnails: [NSImage] = []
+    @Published private(set) var hasAudio = false
+    @Published private(set) var isExporting = false
+
+    @Published var format: RecordingFormat {
+        didSet {
+            guard format != oldValue else { return }
+            quality = format == .gif ? .medium : .original
+            framesPerSecond = format == .gif ? actions.gifFramesPerSecond : min(sourceFPS, 60)
+        }
+    }
+
+    @Published var quality: VideoQuality = .original
+    @Published var framesPerSecond = 60
+    @Published var includeAudio = true
+
+    private var sourceFPS = 60
+    private var sourcePixelHeight: CGFloat = 0
+    private var fileSize: Int64 = 0
+    private var timeObserver: Any?
+
+    static let minimumLength = 0.3
 
     init(videoURL: URL, actions: VideoEditorActions) {
         self.videoURL = videoURL
         self.actions = actions
         player = AVPlayer(url: videoURL)
+        format = actions.defaultFormat
+        if format == .gif {
+            quality = .medium
+            framesPerSecond = actions.gifFramesPerSecond
+        }
+
+        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] time in
+            MainActor.assumeIsolated {
+                self?.playerDidAdvance(to: time.seconds)
+            }
+        }
+
+        Task { await load() }
     }
 
-    var trimRange: CMTimeRange? {
-        guard let item = player.currentItem else { return nil }
-        let duration = item.duration
-        let start = item.reversePlaybackEndTime.isValid ? item.reversePlaybackEndTime : .zero
-        let end = item.forwardPlaybackEndTime.isValid ? item.forwardPlaybackEndTime : duration
-
-        guard duration.isValid, start != .zero || end != duration else { return nil }
-        return CMTimeRange(start: start, end: end)
+    var fpsOptions: [Int] {
+        format == .gif ? [10, 15, 24] : [24, 30, 60]
     }
 
-    func beginTrimming() {
-        guard let playerView, playerView.canBeginTrimming else { return }
-        playerView.beginTrimming { _ in
-            Task { @MainActor [weak self] in self?.updateTrimDescription() }
+    var trimLength: Double {
+        max(trimEnd - trimStart, 0)
+    }
+
+    var isTrimmed: Bool {
+        trimStart > 0.05 || trimEnd < duration - 0.05
+    }
+
+    var estimatedSize: String {
+        guard format == .mp4, duration > 0, fileSize > 0 else { return "Al exportar" }
+
+        var bytes = Double(fileSize) * trimLength / duration
+        if let maxHeight = quality.maxVideoHeight, sourcePixelHeight > maxHeight {
+            bytes *= pow(maxHeight / sourcePixelHeight, 2)
+        }
+        bytes *= min(Double(framesPerSecond) / Double(max(sourceFPS, 1)), 1)
+        return "≈ " + ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+
+    // MARK: Playback
+
+    func togglePlayback() {
+        if isPlaying {
+            player.pause()
+            isPlaying = false
+            return
+        }
+        if currentTime >= trimEnd - 0.05 || currentTime < trimStart {
+            seek(to: trimStart)
+        }
+        player.play()
+        isPlaying = true
+    }
+
+    func seek(to seconds: Double) {
+        let clamped = min(max(seconds, 0), duration)
+        currentTime = clamped
+        player.seek(to: CMTime(seconds: clamped, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    func setTrimStart(_ seconds: Double) {
+        trimStart = min(max(seconds, 0), trimEnd - Self.minimumLength)
+        pauseAndSeek(to: trimStart)
+    }
+
+    func setTrimEnd(_ seconds: Double) {
+        trimEnd = max(min(seconds, duration), trimStart + Self.minimumLength)
+        pauseAndSeek(to: trimEnd)
+    }
+
+    func resetTrim() {
+        trimStart = 0
+        trimEnd = duration
+    }
+
+    func tearDown() {
+        player.pause()
+        if let timeObserver {
+            player.removeTimeObserver(timeObserver)
+            self.timeObserver = nil
         }
     }
 
+    // MARK: Export
+
     func copy() {
-        export { [actions] url in actions.onCopy(url) }
+        export(actions.onCopy)
     }
 
     func save() {
-        export { [actions] url in actions.onSave(url) }
-    }
-
-    func exportGIF() {
-        let range = trimRange.map { CMTimeRangeValue(start: $0.start.seconds, duration: $0.duration.seconds) }
-        actions.onExportGIF(videoURL, range)
+        export(actions.onSave)
     }
 
     private func export(_ completion: @escaping (URL) -> Void) {
-        let range = trimRange
-        guard range != nil || removeAudio else {
+        let range = isTrimmed
+            ? CMTimeRange(start: CMTime(seconds: trimStart, preferredTimescale: 600), end: CMTime(seconds: trimEnd, preferredTimescale: 600))
+            : nil
+
+        let keepsOriginal = format == .mp4 && range == nil && (includeAudio || !hasAudio)
+            && quality == .original && framesPerSecond >= sourceFPS
+        if keepsOriginal {
             completion(videoURL)
             return
         }
 
+        player.pause()
+        isPlaying = false
         isExporting = true
+
+        let base = videoURL.deletingPathExtension().lastPathComponent
         let output = videoURL.deletingLastPathComponent()
-            .appendingPathComponent(videoURL.deletingPathExtension().lastPathComponent + "-editado")
-            .appendingPathExtension("mp4")
+            .appendingPathComponent("\(base) recorte")
+            .appendingPathExtension(format == .gif ? "gif" : "mp4")
 
         Task {
             defer { isExporting = false }
             do {
-                let url = try await VideoExporter.export(videoURL: videoURL, to: output, timeRange: range, removeAudio: removeAudio)
+                let url: URL = switch format {
+                case .mp4:
+                    try await VideoExporter.export(
+                        videoURL: videoURL,
+                        to: output,
+                        timeRange: range,
+                        removeAudio: !includeAudio,
+                        maxHeight: quality.maxVideoHeight,
+                        framesPerSecond: framesPerSecond
+                    )
+                case .gif:
+                    try await GifExporter.export(
+                        videoURL: videoURL,
+                        to: output,
+                        framesPerSecond: framesPerSecond,
+                        maxWidth: quality.gifWidth,
+                        timeRange: range
+                    )
+                }
                 completion(url)
             } catch {
                 NSSound.beep()
@@ -120,91 +288,402 @@ private final class VideoEditorModel: ObservableObject {
         }
     }
 
-    private func updateTrimDescription() {
-        guard let range = trimRange else {
-            trimDescription = nil
-            return
+    // MARK: Private
+
+    private func load() async {
+        let asset = AVURLAsset(url: videoURL)
+        let seconds = await (try? asset.load(.duration).seconds) ?? 0
+        duration = seconds
+        trimEnd = seconds
+
+        if let track = try? await asset.loadTracks(withMediaType: .video).first {
+            sourceFPS = await Int(((try? track.load(.nominalFrameRate)) ?? 60).rounded())
+            sourcePixelHeight = await (try? track.load(.naturalSize).height) ?? 0
+            if format == .mp4 {
+                framesPerSecond = min(max(sourceFPS, 24), 60)
+            }
         }
-        trimDescription = "Recorte: \(Self.format(range.start.seconds)) – \(Self.format(range.end.seconds))"
+        hasAudio = await !((try? asset.loadTracks(withMediaType: .audio)) ?? []).isEmpty
+        fileSize = ((try? FileManager.default.attributesOfItem(atPath: videoURL.path)[.size]) as? NSNumber)?.int64Value ?? 0
+
+        thumbnails = await VideoExporter.filmstrip(for: videoURL, count: 14, height: 48)
     }
 
-    private static func format(_ seconds: Double) -> String {
-        let total = max(Int(seconds.rounded()), 0)
-        return String(format: "%d:%02d", total / 60, total % 60)
+    private func pauseAndSeek(to seconds: Double) {
+        player.pause()
+        isPlaying = false
+        seek(to: seconds)
+    }
+
+    private func playerDidAdvance(to seconds: Double) {
+        guard seconds.isFinite else { return }
+        currentTime = seconds
+        if isPlaying, seconds >= trimEnd {
+            player.pause()
+            isPlaying = false
+            seek(to: trimEnd)
+        }
+    }
+
+    static func timeString(_ seconds: Double) -> String {
+        let clamped = max(seconds, 0)
+        let minutes = Int(clamped) / 60
+        let rest = clamped - Double(minutes * 60)
+        return String(format: "%d:%04.1f", minutes, rest)
+    }
+
+    /// Acepta "1:02.5", "62.5" o "62".
+    static func parseTime(_ text: String) -> Double? {
+        let parts = text.replacingOccurrences(of: ",", with: ".").split(separator: ":")
+        switch parts.count {
+        case 1:
+            return Double(parts[0])
+        case 2:
+            guard let minutes = Double(parts[0]), let seconds = Double(parts[1]) else { return nil }
+            return minutes * 60 + seconds
+        default:
+            return nil
+        }
     }
 }
+
+// MARK: - Views
 
 private struct VideoEditorView: View {
     @ObservedObject var model: VideoEditorModel
 
     var body: some View {
-        VStack(spacing: 0) {
-            WindowDragArea()
-                .frame(height: 28)
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                WindowDragArea()
+                    .frame(height: 40)
 
-            PlayerViewRepresentable(model: model)
-                .background(Color.black)
+                ZStack {
+                    PlayerViewRepresentable(player: model.player)
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture(perform: model.togglePlayback)
+                    if !model.isPlaying {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 64, height: 64)
+                            .background(Color.black.opacity(0.55), in: Circle())
+                            .allowsHitTesting(false)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .shadow(color: .black.opacity(0.5), radius: 20, y: 8)
+                .padding(.horizontal, 32)
+
+                VStack(spacing: 12) {
+                    TrimBar(model: model)
+                        .frame(height: 56)
+                        .coordinateSpace(.named("trim"))
+                    playbackRow
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 18)
+                .padding(.bottom, 20)
+            }
+            .background(EditorColors.canvasBackground)
 
             Divider().overlay(EditorColors.groupBorder)
 
-            HStack(spacing: 8) {
-                Button {
-                    model.beginTrimming()
-                } label: {
-                    Label("Recortar", systemImage: "scissors")
-                }
-                .buttonStyle(ActionButtonStyle(isPrimary: false))
-                .help("Recortar el inicio y el final")
+            ExportPanel(model: model)
+                .frame(width: 300)
+        }
+        .ignoresSafeArea(.container, edges: .top)
+    }
 
-                Toggle(isOn: $model.removeAudio) {
-                    Label("Quitar audio", systemImage: "speaker.slash")
-                        .font(.system(size: 12, weight: .medium))
-                }
-                .toggleStyle(.button)
-                .buttonStyle(ActionButtonStyle(isPrimary: false, isActive: model.removeAudio))
+    private var playbackRow: some View {
+        HStack(spacing: 12) {
+            Button(action: model.togglePlayback) {
+                Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 34, height: 34)
+                    .background(EditorColors.chip, in: Circle())
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help("Reproducir o pausar (Espacio)")
 
-                if let trimDescription = model.trimDescription {
-                    Text(trimDescription)
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+            TimeField(title: "Inicio", value: model.trimStart, onCommit: model.setTrimStart)
+                .help("Fija el inicio en la posición actual con I")
+            TimeField(title: "Fin", value: model.trimEnd, onCommit: model.setTrimEnd)
+                .help("Fija el fin en la posición actual con O")
+
+            if model.isTrimmed {
+                Button("Restablecer", action: model.resetTrim)
+                    .buttonStyle(ActionButtonStyle(isPrimary: false))
+            }
+
+            Spacer()
+
+            Text("\(VideoEditorModel.timeString(model.currentTime)) / \(VideoEditorModel.timeString(model.duration))")
+                .font(.system(size: 12).monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// Barra de recorte: tira de fotogramas, asas de inicio y fin, zona descartada oscurecida y cabezal.
+private struct TrimBar: View {
+    @ObservedObject var model: VideoEditorModel
+
+    private let handleWidth: CGFloat = 14
+    private let stripInset: CGFloat = 6
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let height = proxy.size.height
+            let startX = x(for: model.trimStart, width: width)
+            let endX = x(for: model.trimEnd, width: width)
+
+            ZStack(alignment: .topLeading) {
+                filmstrip
+                    .frame(width: width, height: height - stripInset * 2)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .offset(y: stripInset)
+                    .gesture(scrubGesture(width: width))
+
+                Color.black.opacity(0.62)
+                    .frame(width: max(startX, 0), height: height - stripInset * 2)
+                    .clipShape(UnevenRoundedRectangle(topLeadingRadius: 8, bottomLeadingRadius: 8))
+                    .offset(y: stripInset)
+                    .allowsHitTesting(false)
+
+                Color.black.opacity(0.62)
+                    .frame(width: max(width - endX, 0), height: height - stripInset * 2)
+                    .clipShape(UnevenRoundedRectangle(bottomTrailingRadius: 8, topTrailingRadius: 8))
+                    .offset(x: endX, y: stripInset)
+                    .allowsHitTesting(false)
+
+                RoundedRectangle(cornerRadius: 9)
+                    .strokeBorder(Color.accentColor, lineWidth: 3)
+                    .frame(width: max(endX - startX, handleWidth * 2), height: height)
+                    .offset(x: startX)
+                    .allowsHitTesting(false)
+
+                handle(height: height)
+                    .offset(x: startX)
+                    .gesture(handleGesture(width: width) { model.setTrimStart($0) })
+                    .help("Arrastra para fijar el inicio")
+
+                handle(height: height)
+                    .offset(x: endX - handleWidth)
+                    .gesture(handleGesture(width: width) { model.setTrimEnd($0) })
+                    .help("Arrastra para fijar el fin")
+
+                Rectangle()
+                    .fill(Color.white)
+                    .frame(width: 2, height: height + 8)
+                    .shadow(color: .black.opacity(0.6), radius: 2)
+                    .offset(x: x(for: model.currentTime, width: width) - 1, y: -4)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private var filmstrip: some View {
+        HStack(spacing: 0) {
+            if model.thumbnails.isEmpty {
+                EditorColors.chip
+            } else {
+                ForEach(Array(model.thumbnails.enumerated()), id: \.offset) { _, image in
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
+                }
+            }
+        }
+        .background(EditorColors.chip)
+    }
+
+    private func handle(height: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: 6)
+            .fill(Color.accentColor)
+            .frame(width: handleWidth, height: height)
+            .overlay(
+                Capsule()
+                    .fill(Color.white.opacity(0.9))
+                    .frame(width: 3, height: 18)
+            )
+            .contentShape(Rectangle().inset(by: -8))
+            .pointerStyle(.columnResize)
+    }
+
+    private func x(for seconds: Double, width: CGFloat) -> CGFloat {
+        guard model.duration > 0 else { return 0 }
+        return CGFloat(seconds / model.duration) * width
+    }
+
+    private func seconds(for x: CGFloat, width: CGFloat) -> Double {
+        guard width > 0 else { return 0 }
+        return Double(min(max(x / width, 0), 1)) * model.duration
+    }
+
+    private func handleGesture(width: CGFloat, apply: @escaping (Double) -> Void) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named("trim"))
+            .onChanged { value in apply(seconds(for: value.location.x, width: width)) }
+    }
+
+    private func scrubGesture(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named("trim"))
+            .onChanged { value in model.seek(to: seconds(for: value.location.x, width: width)) }
+    }
+}
+
+private struct TimeField: View {
+    let title: String
+    let value: Double
+    let onCommit: (Double) -> Void
+
+    @State private var text = ""
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            TextField(title, text: $text)
+                .textFieldStyle(.plain)
+                .labelsHidden()
+                .font(.system(size: 12).monospacedDigit())
+                .multilineTextAlignment(.center)
+                .frame(width: 64, height: 28)
+                .background(EditorColors.inspectorBackground, in: RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(isFocused ? Color.accentColor : EditorColors.groupBorder, lineWidth: 1))
+                .focused($isFocused)
+                .onSubmit {
+                    if let seconds = VideoEditorModel.parseTime(text) {
+                        onCommit(seconds)
+                    }
+                    text = VideoEditorModel.timeString(value)
+                    isFocused = false
+                }
+        }
+        .onAppear { text = VideoEditorModel.timeString(value) }
+        .onChange(of: value) { _, newValue in
+            if !isFocused {
+                text = VideoEditorModel.timeString(newValue)
+            }
+        }
+    }
+}
+
+private struct ExportPanel: View {
+    @ObservedObject var model: VideoEditorModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Exportar")
+                .font(.system(size: 15, weight: .bold))
+                .padding(.top, 40)
+
+            VStack(alignment: .leading, spacing: 8) {
+                InspectorTitle("Formato")
+                HStack(spacing: 8) {
+                    formatCard(.mp4, title: "MP4", subtitle: "Video con audio")
+                    formatCard(.gif, title: "GIF", subtitle: "Animación sin audio")
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                InspectorTitle(model.format == .gif ? "Tamaño y fluidez" : "Calidad")
+                ChipRow(options: VideoQuality.allCases, selection: $model.quality) { $0.title(for: model.format) }
+                ChipRow(options: model.fpsOptions, selection: $model.framesPerSecond) { "\($0) fps" }
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                InspectorTitle("Audio")
+                if model.format == .gif {
+                    Text("Los GIF no llevan audio.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                } else if model.hasAudio {
+                    Toggle(isOn: $model.includeAudio) {
+                        Text("Incluir audio").font(.system(size: 13))
+                    }
+                    .toggleStyle(.checkbox)
+                } else {
+                    Text("Esta grabación no tiene audio.")
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
+            }
 
+            Spacer()
+
+            HStack {
+                Text("Duración ").foregroundStyle(.secondary)
+                    + Text(String(format: "%.1f s", model.trimLength)).fontWeight(.semibold)
                 Spacer()
+                Text("Tamaño ").foregroundStyle(.secondary)
+                    + Text(model.estimatedSize).fontWeight(.semibold)
+            }
+            .font(.system(size: 12))
+            .padding(12)
+            .background(EditorColors.chip, in: RoundedRectangle(cornerRadius: 10))
 
-                if model.isExporting {
-                    ProgressView().controlSize(.small)
+            HStack(spacing: 8) {
+                Button(action: model.save) {
+                    Text("Guardar").frame(maxWidth: .infinity)
                 }
-
-                Button("Exportar GIF", action: model.exportGIF)
-                    .buttonStyle(ActionButtonStyle(isPrimary: false))
-
-                Button("Guardar", action: model.save)
-                    .buttonStyle(ActionButtonStyle(isPrimary: false))
+                .buttonStyle(ActionButtonStyle(isPrimary: false))
 
                 Button(action: model.copy) {
-                    Label("Copiar", systemImage: "doc.on.doc")
+                    Group {
+                        if model.isExporting {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text("Copiar")
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(ActionButtonStyle())
             }
             .disabled(model.isExporting)
-            .padding(.horizontal, 12)
-            .frame(height: 48)
         }
-        .background(EditorColors.windowBackground)
-        .ignoresSafeArea(.container, edges: .top)
+        .padding(18)
+        .frame(maxHeight: .infinity)
+        .background(EditorColors.inspectorBackground)
+    }
+
+    private func formatCard(_ format: RecordingFormat, title: String, subtitle: String) -> some View {
+        let isSelected = model.format == format
+        return Button {
+            model.format = format
+        } label: {
+            VStack(spacing: 2) {
+                Text(title).font(.system(size: 14, weight: .bold))
+                Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 58)
+            .background(isSelected ? EditorColors.chipSelected : EditorColors.chip, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(isSelected ? Color.accentColor : EditorColors.groupBorder, lineWidth: isSelected ? 2 : 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
 private struct PlayerViewRepresentable: NSViewRepresentable {
-    let model: VideoEditorModel
+    let player: AVPlayer
 
     func makeNSView(context _: Context) -> AVPlayerView {
         let view = AVPlayerView()
-        view.player = model.player
-        view.controlsStyle = .floating
+        view.player = player
+        view.controlsStyle = .none
+        view.videoGravity = .resizeAspect
         view.showsFullScreenToggleButton = false
         view.allowsPictureInPicturePlayback = false
-        model.playerView = view
         return view
     }
 

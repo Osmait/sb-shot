@@ -19,8 +19,23 @@ struct RenderLayout {
 
         visibleRect = visible
         self.background = background
-        outputSize = CGSize(width: visible.width + padding * 2, height: visible.height + padding * 2)
-        contentRect = CGRect(x: padding, y: padding, width: visible.width, height: visible.height)
+
+        // Con una proporcion fija el lienzo crece en un solo eje y la imagen queda centrada.
+        var size = CGSize(width: visible.width + padding * 2, height: visible.height + padding * 2)
+        if let ratio = background?.aspect.ratio {
+            if size.width / max(size.height, 1) < ratio {
+                size.width = (size.height * ratio).rounded()
+            } else {
+                size.height = (size.width / ratio).rounded()
+            }
+        }
+        outputSize = size
+        contentRect = CGRect(
+            x: ((size.width - visible.width) / 2).rounded(),
+            y: ((size.height - visible.height) / 2).rounded(),
+            width: visible.width,
+            height: visible.height
+        )
     }
 
     private var offset: CGSize {

@@ -3,9 +3,14 @@ import SwiftUI
 // MARK: - Design Tokens
 
 enum EditorColors {
-    static let canvasBackground = Color(red: 0.09, green: 0.09, blue: 0.1)
-    static let windowBackground = Color(red: 0.14, green: 0.14, blue: 0.15)
+    static let canvasBackground = Color(red: 0.075, green: 0.075, blue: 0.082)
+    static let windowBackground = Color(red: 0.11, green: 0.11, blue: 0.12)
     static let panelBackground = Color(red: 0.12, green: 0.12, blue: 0.13)
+    static let toolbarBackground = Color(red: 0.133, green: 0.133, blue: 0.149)
+    static let inspectorBackground = Color(red: 0.122, green: 0.122, blue: 0.137)
+    static let groupBackground = Color(red: 0.094, green: 0.094, blue: 0.106)
+    static let chip = Color(red: 0.165, green: 0.165, blue: 0.188)
+    static let chipSelected = Color(red: 0.227, green: 0.227, blue: 0.259)
     static let hoverFill = Color.white.opacity(0.08)
     static let pressedFill = Color.white.opacity(0.12)
     static let groupBorder = Color.white.opacity(0.1)
@@ -39,7 +44,7 @@ struct ToolButton: View {
 
     private var backgroundColor: Color {
         if isSelected {
-            return .accentColor
+            return EditorColors.chipSelected
         } else if isHovered {
             return EditorColors.hoverFill
         }
@@ -99,6 +104,50 @@ struct ActionButtonStyle: ButtonStyle {
                 return EditorColors.pressedFill
             }
             return isHovered ? EditorColors.hoverFill : .clear
+        }
+    }
+}
+
+// MARK: - Inspector controls
+
+/// Titulo de seccion en mayusculas de los paneles laterales.
+struct InspectorTitle: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Text(text.uppercased())
+            .font(.system(size: 11, weight: .semibold))
+            .tracking(0.6)
+            .foregroundStyle(Color.white.opacity(0.6))
+    }
+}
+
+/// Fila de botones de opcion con el estilo del inspector.
+struct ChipRow<Option: Hashable>: View {
+    let options: [Option]
+    @Binding var selection: Option
+    let title: (Option) -> String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(options, id: \.self) { option in
+                Button {
+                    selection = option
+                } label: {
+                    Text(title(option))
+                        .font(.system(size: 12, weight: selection == option ? .semibold : .regular))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 28)
+                        .background(selection == option ? EditorColors.chipSelected : EditorColors.chip, in: RoundedRectangle(cornerRadius: 7))
+                        .foregroundStyle(selection == option ? Color.white : Color.white.opacity(0.75))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 }

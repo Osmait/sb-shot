@@ -190,6 +190,18 @@ struct RenderLayoutTests {
         #expect(layout.toImage(CGPoint(x: 20, y: 20)) == CGPoint(x: 100, y: 50))
     }
 
+    @Test func fixedAspectCentersContentOnTheCanvas() {
+        var document = EditorDocument()
+        document.background.isEnabled = true
+        document.background.padding = 0
+        document.background.aspect = .square
+
+        let layout = RenderLayout(document: document, imageSize: CGSize(width: 400, height: 200))
+
+        #expect(layout.outputSize == CGSize(width: 400, height: 400))
+        #expect(layout.contentRect == CGRect(x: 0, y: 100, width: 400, height: 200))
+    }
+
     @Test func cropIsIgnoredWhileEditingIt() {
         var document = EditorDocument()
         document.cropRect = CGRect(x: 100, y: 50, width: 200, height: 100)

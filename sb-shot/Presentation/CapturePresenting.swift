@@ -15,15 +15,12 @@ struct EditorActions {
 }
 
 struct VideoEditorActions {
+    /// Reciben el archivo ya exportado (MP4 o GIF).
     let onCopy: (URL) -> Void
     let onSave: (URL) -> Void
-    let onExportGIF: (URL, CMTimeRangeValue?) -> Void
-}
-
-/// Rango de tiempo serializable que no obliga a importar AVFoundation en las capas superiores.
-struct CMTimeRangeValue {
-    let start: Double
-    let duration: Double
+    /// Valores iniciales del panel de exportacion, tomados de los ajustes.
+    let defaultFormat: RecordingFormat
+    let gifFramesPerSecond: Int
 }
 
 protocol QuickAccessPresenting: AnyObject {
