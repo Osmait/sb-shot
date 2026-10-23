@@ -63,6 +63,41 @@ struct RecordingIntegrationTests {
         #expect(fps <= 31)
     }
 
+    @Test func exportsVideoWithBackground() async throws {
+        try #require(CGPreflightScreenCaptureAccess(), "Falta el permiso de grabación de pantalla")
+        let screen = try #require(NSScreen.screens.first)
+        let area = CGRect(x: screen.frame.minX + 100, y: screen.frame.minY + 100, width: 800, height: 500)
+
+        let recorder = ScreenRecordingService()
+        try await recorder.start(.area(area), options: RecordingOptions(), visibleOwnWindowNumbers: [])
+        try await Task.sleep(nanoseconds: 2_000_000_000)
+        let source = try await recorder.stop()
+        let sourceTrack = try #require(try await AVURLAsset(url: source).loadTracks(withMediaType: .video).first)
+        let sourceSize = try await sourceTrack.load(.naturalSize)
+
+        let red = CGColor(red: 1, green: 0, blue: 0, alpha: 1)
+        let style = VideoBackgroundStyle(startColor: red, endColor: red, padding: 80, cornerRadius: 16, shadow: true, aspectRatio: 16.0 / 9.0)
+        let output = source.deletingPathExtension().appendingPathExtension("fondo.mp4")
+        _ = try await VideoExporter.export(videoURL: source, to: output, timeRange: nil, removeAudio: true, background: style)
+
+        let asset = AVURLAsset(url: output)
+        let track = try #require(try await asset.loadTracks(withMediaType: .video).first)
+        let size = try await track.load(.naturalSize)
+        #expect(size.width > sourceSize.width && size.height > sourceSize.height)
+        #expect(abs(size.width / size.height - 16.0 / 9.0) < 0.01)
+
+        let generator = AVAssetImageGenerator(asset: asset)
+        let (frame, _) = try await generator.image(at: CMTime(seconds: 0.5, preferredTimescale: 600))
+        let corner = try #require(frame.cropping(to: CGRect(x: 4, y: 4, width: 1, height: 1)))
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = try #require(try CGContext(
+            data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            space: #require(CGColorSpace(name: CGColorSpace.sRGB)), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(corner, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        #expect(pixel[0] > 200 && pixel[1] < 60 && pixel[2] < 60, "La esquina debería ser del fondo rojo")
+    }
+
     @Test func capturesAreaAtNativeResolution() async throws {
         try #require(CGPreflightScreenCaptureAccess(), "Falta el permiso de grabación de pantalla")
 

@@ -494,28 +494,6 @@ private struct BackgroundSection: View {
 
 // MARK: - Inspector controls
 
-private struct InspectorSlider: View {
-    let title: String
-    @Binding var value: CGFloat
-    let range: ClosedRange<CGFloat>
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(title)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(verbatim: "\(Int(value))")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-            Slider(value: $value, in: range)
-                .controlSize(.small)
-        }
-    }
-}
-
 private struct ColorGrid: View {
     @Binding var selection: Color
 

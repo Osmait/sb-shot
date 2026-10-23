@@ -12,7 +12,14 @@ enum VideoProcessingError: Error {
 nonisolated enum GifExporter {
     /// ImageIO conserva todos los cuadros en memoria hasta finalizar, asi que se limita su numero.
     private static let maxFrames = 600
-    static func export(videoURL: URL, to outputURL: URL, framesPerSecond: Int, maxWidth: CGFloat, timeRange: CMTimeRange? = nil) async throws -> URL {
+    static func export(
+        videoURL: URL,
+        to outputURL: URL,
+        framesPerSecond: Int,
+        maxWidth: CGFloat,
+        timeRange: CMTimeRange? = nil,
+        background: VideoBackgroundStyle? = nil
+    ) async throws -> URL {
         let asset = AVURLAsset(url: videoURL)
         let duration = try await asset.load(.duration)
         let range = timeRange ?? CMTimeRange(start: .zero, duration: duration)
@@ -33,6 +40,9 @@ nonisolated enum GifExporter {
         generator.requestedTimeToleranceBefore = .zero
         generator.requestedTimeToleranceAfter = CMTime(seconds: 0.5 / Double(fps), preferredTimescale: 600)
         generator.maximumSize = CGSize(width: width, height: 10000)
+        if let background {
+            generator.videoComposition = try await VideoBackgroundCompositor.makeComposition(for: asset, style: background)
+        }
 
         try? FileManager.default.removeItem(at: outputURL)
         guard let destination = CGImageDestinationCreateWithURL(outputURL as CFURL, UTType.gif.identifier as CFString, frameCount, nil) else {
@@ -81,7 +91,8 @@ enum VideoExporter {
         timeRange: CMTimeRange?,
         removeAudio: Bool,
         maxHeight: CGFloat? = nil,
-        framesPerSecond: Int? = nil
+        framesPerSecond: Int? = nil,
+        background: VideoBackgroundStyle? = nil
     ) async throws -> URL {
         let asset = AVURLAsset(url: videoURL)
         let duration = try await asset.load(.duration)
@@ -119,9 +130,22 @@ enum VideoExporter {
             throw VideoProcessingError.exportFailed
         }
 
-        let scale = maxHeight.map { min($0 / max(naturalSize.height, 1), 1) } ?? 1
         let changesFPS = framesPerSecond.map { Float($0) < sourceFPS - 0.5 } ?? false
-        if let videoTrack, scale < 1 || changesFPS {
+
+        if let background {
+            // La altura maxima se aplica al lienzo completo (video + fondo).
+            let fullSize = VideoBackgroundCompositor.layout(videoSize: naturalSize, style: background).renderSize
+            let scale = maxHeight.map { min($0 / max(fullSize.height, 1), 1) } ?? 1
+            session.videoComposition = try await VideoBackgroundCompositor.makeComposition(
+                for: composition,
+                style: background,
+                outputScale: scale,
+                framesPerSecond: changesFPS ? framesPerSecond : nil
+            )
+        }
+
+        let scale = maxHeight.map { min($0 / max(naturalSize.height, 1), 1) } ?? 1
+        if background == nil, let videoTrack, scale < 1 || changesFPS {
             session.videoComposition = makeVideoComposition(
                 track: videoTrack,
                 duration: composition.duration,

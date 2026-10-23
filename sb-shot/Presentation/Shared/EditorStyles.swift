@@ -152,6 +152,29 @@ struct ChipRow<Option: Hashable>: View {
     }
 }
 
+/// Slider con titulo y valor, para los paneles laterales.
+struct InspectorSlider: View {
+    let title: String
+    @Binding var value: CGFloat
+    let range: ClosedRange<CGFloat>
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(verbatim: "\(Int(value))")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: $value, in: range)
+                .controlSize(.small)
+        }
+    }
+}
+
 // MARK: - WindowDragArea
 
 /// Zona vacia que permite arrastrar ventanas cuyo contenido SwiftUI cubre la barra de titulo.

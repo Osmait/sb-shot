@@ -134,11 +134,19 @@ private final class VideoEditorModel: ObservableObject {
     @Published var quality: VideoQuality = .original
     @Published var framesPerSecond = 60
     @Published var includeAudio = true
+    @Published var background = BackgroundSettings() {
+        didSet {
+            if background != oldValue {
+                scheduleBackgroundPreview()
+            }
+        }
+    }
 
     private var sourceFPS = 60
     private var sourcePixelHeight: CGFloat = 0
     private var fileSize: Int64 = 0
     private var timeObserver: Any?
+    private var previewTask: Task<Void, Never>?
 
     static let minimumLength = 0.3
 
@@ -221,10 +229,53 @@ private final class VideoEditorModel: ObservableObject {
     }
 
     func tearDown() {
+        previewTask?.cancel()
         player.pause()
         if let timeObserver {
             player.removeTimeObserver(timeObserver)
             self.timeObserver = nil
+        }
+    }
+
+    // MARK: Background
+
+    /// Estilo del fondo para Core Image, o `nil` si esta desactivado.
+    var backgroundStyle: VideoBackgroundStyle? {
+        guard background.isEnabled else { return nil }
+        let colors = background.preset.colors.map(\.cgColorValue)
+        return VideoBackgroundStyle(
+            startColor: colors.first ?? CGColor(gray: 0, alpha: 1),
+            endColor: colors.last ?? CGColor(gray: 0, alpha: 1),
+            padding: background.padding,
+            cornerRadius: background.cornerRadius,
+            shadow: background.shadow,
+            aspectRatio: background.aspect.ratio
+        )
+    }
+
+    func updateBackground(_ change: (inout BackgroundSettings) -> Void) {
+        var updated = background
+        change(&updated)
+        background = updated
+    }
+
+    /// Aplica el fondo a la reproduccion. Se agrupan los cambios seguidos de los sliders.
+    private func scheduleBackgroundPreview() {
+        previewTask?.cancel()
+        let style = backgroundStyle
+        previewTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            guard !Task.isCancelled, let self, let item = player.currentItem else { return }
+
+            if let style {
+                item.videoComposition = try? await VideoBackgroundCompositor.makeComposition(for: item.asset, style: style)
+            } else {
+                item.videoComposition = nil
+            }
+            guard !Task.isCancelled else { return }
+            if !isPlaying {
+                seek(to: currentTime)
+            }
         }
     }
 
@@ -243,7 +294,8 @@ private final class VideoEditorModel: ObservableObject {
             ? CMTimeRange(start: CMTime(seconds: trimStart, preferredTimescale: 600), end: CMTime(seconds: trimEnd, preferredTimescale: 600))
             : nil
 
-        let keepsOriginal = format == .mp4 && range == nil && (includeAudio || !hasAudio)
+        let style = backgroundStyle
+        let keepsOriginal = format == .mp4 && range == nil && style == nil && (includeAudio || !hasAudio)
             && quality == .original && framesPerSecond >= sourceFPS
         if keepsOriginal {
             completion(videoURL)
@@ -270,7 +322,8 @@ private final class VideoEditorModel: ObservableObject {
                         timeRange: range,
                         removeAudio: !includeAudio,
                         maxHeight: quality.maxVideoHeight,
-                        framesPerSecond: framesPerSecond
+                        framesPerSecond: framesPerSecond,
+                        background: style
                     )
                 case .gif:
                     try await GifExporter.export(
@@ -278,7 +331,8 @@ private final class VideoEditorModel: ObservableObject {
                         to: output,
                         framesPerSecond: framesPerSecond,
                         maxWidth: quality.gifWidth,
-                        timeRange: range
+                        timeRange: range,
+                        background: style
                     )
                 }
                 completion(url)
@@ -585,74 +639,88 @@ private struct ExportPanel: View {
                 .font(.system(size: 15, weight: .bold))
                 .padding(.top, 40)
 
-            VStack(alignment: .leading, spacing: 8) {
-                InspectorTitle("Formato")
-                HStack(spacing: 8) {
-                    formatCard(.mp4, title: "MP4", subtitle: "Video con audio")
-                    formatCard(.gif, title: "GIF", subtitle: "Animación sin audio")
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    settingsSections
+                    VideoBackgroundSection(model: model)
                 }
             }
+            .scrollIndicators(.never)
 
-            VStack(alignment: .leading, spacing: 8) {
-                InspectorTitle(model.format == .gif ? "Tamaño y fluidez" : "Calidad")
-                ChipRow(options: VideoQuality.allCases, selection: $model.quality) { $0.title(for: model.format) }
-                ChipRow(options: model.fpsOptions, selection: $model.framesPerSecond) { "\($0) fps" }
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                InspectorTitle("Audio")
-                if model.format == .gif {
-                    Text("Los GIF no llevan audio.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                } else if model.hasAudio {
-                    Toggle(isOn: $model.includeAudio) {
-                        Text("Incluir audio").font(.system(size: 13))
-                    }
-                    .toggleStyle(.checkbox)
-                } else {
-                    Text("Esta grabación no tiene audio.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Spacer()
-
-            HStack {
-                Text("Duración ").foregroundStyle(.secondary)
-                    + Text(String(format: "%.1f s", model.trimLength)).fontWeight(.semibold)
-                Spacer()
-                Text("Tamaño ").foregroundStyle(.secondary)
-                    + Text(model.estimatedSize).fontWeight(.semibold)
-            }
-            .font(.system(size: 12))
-            .padding(12)
-            .background(EditorColors.chip, in: RoundedRectangle(cornerRadius: 10))
-
-            HStack(spacing: 8) {
-                Button(action: model.save) {
-                    Text("Guardar").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(ActionButtonStyle(isPrimary: false))
-
-                Button(action: model.copy) {
-                    Group {
-                        if model.isExporting {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Text("Copiar")
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(ActionButtonStyle())
-            }
-            .disabled(model.isExporting)
+            footer
         }
         .padding(18)
         .frame(maxHeight: .infinity)
         .background(EditorColors.inspectorBackground)
+    }
+
+    @ViewBuilder
+    private var settingsSections: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            InspectorTitle("Formato")
+            HStack(spacing: 8) {
+                formatCard(.mp4, title: "MP4", subtitle: "Video con audio")
+                formatCard(.gif, title: "GIF", subtitle: "Animación sin audio")
+            }
+        }
+
+        VStack(alignment: .leading, spacing: 8) {
+            InspectorTitle(model.format == .gif ? "Tamaño y fluidez" : "Calidad")
+            ChipRow(options: VideoQuality.allCases, selection: $model.quality) { $0.title(for: model.format) }
+            ChipRow(options: model.fpsOptions, selection: $model.framesPerSecond) { "\($0) fps" }
+        }
+
+        VStack(alignment: .leading, spacing: 10) {
+            InspectorTitle("Audio")
+            if model.format == .gif {
+                Text("Los GIF no llevan audio.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            } else if model.hasAudio {
+                Toggle(isOn: $model.includeAudio) {
+                    Text("Incluir audio").font(.system(size: 13))
+                }
+                .toggleStyle(.checkbox)
+            } else {
+                Text("Esta grabación no tiene audio.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var footer: some View {
+        HStack {
+            Text("Duración ").foregroundStyle(.secondary)
+                + Text(String(format: "%.1f s", model.trimLength)).fontWeight(.semibold)
+            Spacer()
+            Text("Tamaño ").foregroundStyle(.secondary)
+                + Text(model.estimatedSize).fontWeight(.semibold)
+        }
+        .font(.system(size: 12))
+        .padding(12)
+        .background(EditorColors.chip, in: RoundedRectangle(cornerRadius: 10))
+
+        HStack(spacing: 8) {
+            Button(action: model.save) {
+                Text("Guardar").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(ActionButtonStyle(isPrimary: false))
+
+            Button(action: model.copy) {
+                Group {
+                    if model.isExporting {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("Copiar")
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(ActionButtonStyle())
+        }
+        .disabled(model.isExporting)
     }
 
     private func formatCard(_ format: RecordingFormat, title: String, subtitle: String) -> some View {
@@ -671,6 +739,93 @@ private struct ExportPanel: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Fondo del video: degradado, margen, esquinas, sombra y proporcion, como en el editor de capturas.
+private struct VideoBackgroundSection: View {
+    @ObservedObject var model: VideoEditorModel
+
+    private var background: BackgroundSettings {
+        model.background
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                InspectorTitle("Fondo")
+                Spacer()
+                Toggle("Fondo", isOn: Binding(
+                    get: { background.isEnabled },
+                    set: { value in model.updateBackground { $0.isEnabled = value } }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+            }
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+                ForEach(BackgroundPreset.all) { preset in
+                    Button {
+                        model.updateBackground {
+                            $0.presetIndex = preset.id
+                            $0.isEnabled = true
+                        }
+                    } label: {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(LinearGradient(colors: preset.colors, startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(height: 34)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(Color.white, lineWidth: 2)
+                                    .opacity(background.isEnabled && background.presetIndex == preset.id ? 1 : 0)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            InspectorSlider(title: "Margen", value: binding(\.padding), range: 0 ... 200)
+            InspectorSlider(title: "Esquinas", value: binding(\.cornerRadius), range: 0 ... 40)
+
+            Toggle(isOn: Binding(
+                get: { background.shadow },
+                set: { value in model.updateBackground { $0.shadow = value } }
+            )) {
+                Text("Sombra").font(.system(size: 12))
+            }
+            .toggleStyle(.checkbox)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Proporción")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                ChipRow(
+                    options: BackgroundAspect.allCases,
+                    selection: Binding(
+                        get: { background.aspect },
+                        set: { value in
+                            model.updateBackground {
+                                $0.aspect = value
+                                $0.isEnabled = true
+                            }
+                        }
+                    )
+                ) { $0.title }
+            }
+        }
+    }
+
+    private func binding(_ keyPath: WritableKeyPath<BackgroundSettings, CGFloat>) -> Binding<CGFloat> {
+        Binding(
+            get: { background[keyPath: keyPath] },
+            set: { value in
+                model.updateBackground {
+                    $0[keyPath: keyPath] = value
+                    $0.isEnabled = true
+                }
+            }
+        )
     }
 }
 
