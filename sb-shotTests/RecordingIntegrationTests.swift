@@ -68,6 +68,8 @@ struct RecordingIntegrationTests {
         let shadowed = try await service.capture(.window(id: window.id, frame: window.frame), options: options)
 
         #expect(abs(plain.size.width - window.frame.width) <= 1)
-        #expect(shadowed.size.width >= plain.size.width)
+        // La sombra agranda la imagen en lugar de encoger la ventana.
+        #expect(shadowed.size.width > plain.size.width + 10)
+        #expect(shadowed.size.height > plain.size.height + 10)
     }
 }

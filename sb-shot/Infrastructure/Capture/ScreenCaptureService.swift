@@ -119,15 +119,68 @@ struct ScreenCaptureService {
     private func captureWindow(_ window: SCWindow, options: CaptureOptions) async throws -> NSImage {
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let scale = options.downscaleToOneX ? 1 : CGFloat(filter.pointPixelScale)
-        let config = configuration(for: filter, size: filter.contentRect.size, scale: scale)
+
+        // La sombra sobresale de la ventana. Si el lienzo mide lo mismo que la ventana, ScreenCaptureKit encoge
+        // la ventana para que quepa la sombra; por eso se captura sin escalar en un lienzo con margen y despues
+        // se recortan los bordes transparentes.
+        let margin: CGFloat = options.includeWindowShadow ? Self.shadowMargin : 0
+        let canvas = CGSize(width: filter.contentRect.width + margin * 2, height: filter.contentRect.height + margin * 2)
+        let config = configuration(for: filter, size: canvas, scale: scale)
         config.ignoreShadowsSingleWindow = !options.includeWindowShadow
         config.shouldBeOpaque = false
+        config.scalesToFit = false
 
-        // Pendiente de verificar en vivo: con sombra el contenido puede ser mas grande que el frame de la ventana
-        // (ver RecordingIntegrationTests.capturesWindowWithAndWithoutShadow).
-        let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        var image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        if margin > 0, let trimmed = Self.trimmingTransparentEdges(image) {
+            image = trimmed
+        }
         let size = CGSize(width: CGFloat(image.width) / scale, height: CGFloat(image.height) / scale)
         return NSImage(cgImage: image, size: size)
+    }
+
+    private static let shadowMargin: CGFloat = 100
+
+    /// Recorta las filas y columnas totalmente transparentes alrededor de la imagen.
+    private static func trimmingTransparentEdges(_ image: CGImage) -> CGImage? {
+        let width = image.width
+        let height = image.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(
+                data: buffer.baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return nil }
+
+        func isOpaque(_ x: Int, _ y: Int) -> Bool {
+            pixels[(y * width + x) * 4 + 3] > 2
+        }
+        func rowHasContent(_ y: Int) -> Bool {
+            (0 ..< width).contains { isOpaque($0, y) }
+        }
+        func columnHasContent(_ x: Int, rows: ClosedRange<Int>) -> Bool {
+            rows.contains { isOpaque(x, $0) }
+        }
+
+        // El buffer tiene la primera fila arriba, igual que `cropping(to:)`.
+        guard let top = (0 ..< height).first(where: rowHasContent),
+              let bottom = (0 ..< height).reversed().first(where: rowHasContent)
+        else { return nil }
+        let rows = top ... bottom
+        guard let left = (0 ..< width).first(where: { columnHasContent($0, rows: rows) }),
+              let right = (0 ..< width).reversed().first(where: { columnHasContent($0, rows: rows) })
+        else { return nil }
+
+        return image.cropping(to: CGRect(x: left, y: top, width: right - left + 1, height: bottom - top + 1))
     }
 
     private func configuration(for _: SCContentFilter, size: CGSize, scale: CGFloat) -> SCStreamConfiguration {
