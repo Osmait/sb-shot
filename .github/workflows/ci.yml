@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and unit tests
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      # The project needs Xcode 26 or later (default MainActor isolation, approachable concurrency).
+      - name: Select latest stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      # Integration tests skip themselves unless SBSHOT_INTEGRATION is set, so only unit tests run here.
+      - name: Build and test
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project sb-shot.xcodeproj \
+            -scheme SbShot \
+            -destination 'platform=macOS' \
+            -only-testing:SbShotTests \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TestResults
+          path: TestResults.xcresult
+          retention-days: 7
+
+  lint:
+    name: SwiftLint
+    runs-on: macos-26
+    timeout-minutes: 10
+    # Advisory for now: the existing code still has a few large_tuple violations.
+    # Remove continue-on-error once `swiftlint lint` passes cleanly.
+    continue-on-error: true
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install SwiftLint
+        run: brew install swiftlint || brew upgrade swiftlint || true
+
+      - name: Lint
+        run: swiftlint lint --reporter github-actions-logging

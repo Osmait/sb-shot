@@ -1,0 +1,86 @@
+name: Bug report
+description: Something in sb-shot doesn't work as expected.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please search the [existing issues](https://github.com/Osmait/sb-shot/issues) first.
+        Security vulnerabilities should be reported privately (see SECURITY.md), not here.
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      description: Apple menu › About This Mac.
+      placeholder: e.g. macOS 15.6 (24G84)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: sb-shot version or commit
+      description: The commit you built from (`git rev-parse --short HEAD`) or the app version.
+      placeholder: e.g. 332868a
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Capture / selection
+        - Text capture (OCR)
+        - Recording
+        - Quick Access
+        - Annotation editor
+        - Video editor
+        - Backgrounds / wallpaper
+        - Pin
+        - History
+        - Settings / shortcuts
+        - Permissions
+        - Localization
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Press ⇧⌘2
+        2. Click a window
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or recordings
+      description: Drag images or videos here. Please remove any personal information.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Additional context
+      description: Number of displays and their scaling, Apple silicon or Intel, UI language, relevant settings (frozen screen, auto-save, recording format…), Console logs.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and this hasn't been reported yet.
+          required: true
+        - label: sb-shot has the Screen Recording permission in System Settings.
