@@ -4,7 +4,7 @@ import AppKit
 final class SelectionOverlayRegionSelector: RegionSelecting {
     private let capturer: ScreenCaptureProviding
     private var activeController: SelectionOverlayController?
-    /// Se marca antes de esperar las capturas para que dos atajos seguidos no abran dos overlays.
+    /// Set before awaiting the snapshots so two shortcuts in a row don't open two overlays.
     private var isSelecting = false
 
     init(capturer: ScreenCaptureProviding) {
@@ -17,7 +17,7 @@ final class SelectionOverlayRegionSelector: RegionSelecting {
         defer { isSelecting = false }
 
         let needsSnapshots = options.freezeScreen || options.showsMagnifier
-        // Los iconos del escritorio solo se ocultan en la imagen congelada; la lupa muestra la pantalla real.
+        // Desktop icons are only hidden in the frozen image; the magnifier shows the real screen.
         let hidesIcons = options.freezeScreen && options.hidesDesktopIcons
         let snapshots = await needsSnapshots
             ? ((try? capturer.displaySnapshots(hidingDesktopIcons: hidesIcons)) ?? [:])
@@ -47,13 +47,13 @@ final class SelectionOverlayRegionSelector: RegionSelecting {
     }
 }
 
-/// Activa sb-shot para recibir el teclado y despues devuelve el foco a la app que estaba al frente.
+/// Activates sb-shot to receive keyboard input and then returns focus to the app that was frontmost.
 @MainActor
 enum AppFocus {
-    /// `frontmostApplication` tarda en reflejar una reactivacion; se recuerda un momento la app devuelta.
+    /// `frontmostApplication` is slow to reflect a reactivation; the restored app is remembered briefly.
     private static var recentlyRestored: (app: NSRunningApplication, date: Date)?
 
-    /// Activa la app y devuelve la app externa que estaba al frente, para pasarla despues a `restore`.
+    /// Activates the app and returns the external app that was frontmost, to pass later to `restore`.
     static func activate() -> NSRunningApplication? {
         let ownPID = ProcessInfo.processInfo.processIdentifier
         var previous = NSWorkspace.shared.frontmostApplication

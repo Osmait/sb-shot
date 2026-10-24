@@ -2,10 +2,10 @@ import AppKit
 import Combine
 import ScreenCaptureKit
 
-/// Fondo de pantalla actual, para usarlo como fondo de capturas y videos.
-/// Se captura la ventana del escritorio con ScreenCaptureKit, porque en sandbox no siempre se puede leer
-/// el archivo (y asi tambien funcionan los fondos dinamicos). Si falla, se intenta leer el archivo del sistema.
-/// La captura, la lectura y la miniatura se hacen fuera del hilo principal.
+/// Current wallpaper, used as the background for screenshots and videos.
+/// The desktop window is captured with ScreenCaptureKit, because the sandbox can't always read
+/// the file (and this way dynamic wallpapers work too). If that fails, the system file is read instead.
+/// Capturing, reading, and thumbnailing happen off the main thread.
 final class WallpaperProvider: ObservableObject {
     static let shared = WallpaperProvider()
 
@@ -13,10 +13,14 @@ final class WallpaperProvider: ObservableObject {
     @Published private(set) var thumbnail: CGImage?
 
     private var loadTask: Task<Loaded?, Never>?
+    #if DEBUG
+    /// Demo mode: synthetic image used instead of the real wallpaper, which is never read.
+    var demoImage: CGImage?
+    #endif
     private var loadedAt: Date?
     private var loadedDisplayID: CGDirectDisplayID?
 
-    /// Tiempo durante el que se reutiliza la ultima lectura sin volver a capturar.
+    /// How long the last read is reused without capturing again.
     private static let maxAge: TimeInterval = 30
 
     private struct Loaded: Sendable {
@@ -24,8 +28,8 @@ final class WallpaperProvider: ObservableObject {
         let thumbnail: CGImage
     }
 
-    /// Lee el fondo solo si no hay uno cargado, es de otra pantalla o tiene mas de `maxAge` segundos.
-    /// Asi abrir un editor no vuelve a capturar ni invalida la cache del desenfoque.
+    /// Reads the wallpaper only if none is loaded, it belongs to another screen, or it is older than `maxAge` seconds.
+    /// This way opening an editor doesn't capture again or invalidate the blur cache.
     @discardableResult
     func refreshIfStale() async -> CGImage? {
         let displayID = ScreenGeometry.screenUnderCursor.flatMap(ScreenGeometry.displayID(of:))
@@ -35,9 +39,16 @@ final class WallpaperProvider: ObservableObject {
         return await refresh()
     }
 
-    /// Vuelve a leer el fondo de la pantalla bajo el cursor. Las llamadas simultaneas comparten la misma carga.
+    /// Rereads the wallpaper of the screen under the cursor. Concurrent calls share the same load.
     @discardableResult
     func refresh() async -> CGImage? {
+        #if DEBUG
+        if let demoImage {
+            image = demoImage
+            thumbnail = Self.downsample(demoImage, maxPixelDimension: 480) ?? demoImage
+            return demoImage
+        }
+        #endif
         if let loadTask {
             return await loadTask.value?.image ?? image
         }
@@ -69,7 +80,7 @@ final class WallpaperProvider: ObservableObject {
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else { return nil }
         guard let display = content.displays.first(where: { $0.displayID == displayID }) ?? content.displays.first else { return nil }
 
-        // El Dock dibuja el fondo en ventanas "Wallpaper-<id>", una por pantalla.
+        // The Dock draws the wallpaper in "Wallpaper-<id>" windows, one per screen.
         let wallpapers = content.windows.filter { window in
             window.owningApplication?.bundleIdentifier == "com.apple.dock"
                 && (window.title ?? "").hasPrefix("Wallpaper")
@@ -119,19 +130,19 @@ final class WallpaperProvider: ObservableObject {
     }
 }
 
-/// Fondo de pantalla desenfocado y/o reducido. Guarda los ultimos resultados para no recalcularlos en cada
-/// redibujado del lienzo. Se puede usar desde cualquier hilo.
+/// Blurred and/or downscaled wallpaper. Caches the latest results so they aren't recomputed on every
+/// canvas redraw. Safe to use from any thread.
 nonisolated enum WallpaperBlur {
-    /// Lado mayor de la imagen al desenfocar. Una imagen borrosa no necesita mas resolucion y asi el slider responde rapido.
+    /// Longest side of the image when blurring. A blurred image doesn't need more resolution, and this keeps the slider responsive.
     private static let referenceDimension: CGFloat = 1600
-    /// Paso al redondear el tamano pedido, para no recalcular con cada cambio pequeno del lienzo.
+    /// Step used to round the requested size, to avoid recomputing on every small canvas change.
     private static let dimensionStep: CGFloat = 256
     private static let cacheLimit = 4
 
     private struct Entry {
         let source: CGImage
         let radius: CGFloat
-        /// Lado mayor del resultado pedido, o `nil` para la version sin limite.
+        /// Longest side of the requested result, or `nil` for the unlimited version.
         let dimension: CGFloat?
         let result: CGImage
     }
@@ -145,8 +156,8 @@ nonisolated enum WallpaperBlur {
         return cached(wallpaper, radius: radius, dimension: nil)
     }
 
-    /// Version para dibujar con relleno proporcional en un lienzo de `pixelSize` pixeles: no mayor de lo necesario.
-    /// Con desenfoque se ve igual que `image(_:radius:)`, solo que a menor resolucion si el lienzo es pequeno.
+    /// Version for aspect-fill drawing on a canvas of `pixelSize` pixels: no larger than needed.
+    /// With blur it looks the same as `image(_:radius:)`, just at a lower resolution if the canvas is small.
     static func image(_ wallpaper: CGImage, radius: CGFloat, covering pixelSize: CGSize) -> CGImage {
         let source = CGSize(width: wallpaper.width, height: wallpaper.height)
         let fill = max(pixelSize.width / max(source.width, 1), pixelSize.height / max(source.height, 1))
@@ -187,7 +198,7 @@ nonisolated enum WallpaperBlur {
             return WallpaperProvider.downsample(wallpaper, maxPixelDimension: dimension ?? largest)
         }
 
-        // El radio esta definido sobre la imagen de referencia; si se trabaja mas pequeno se escala igual.
+        // The radius is defined on the reference image; when working at a smaller size it is scaled accordingly.
         let referenceScale = min(referenceDimension / largest, 1)
         let workScale = min(referenceScale, (dimension ?? .infinity) / largest)
         let sigma = radius * workScale / referenceScale
@@ -205,7 +216,7 @@ nonisolated enum WallpaperBlur {
 }
 
 nonisolated extension CGRect {
-    /// Rectangulo que cubre `bounds` por completo manteniendo la proporcion de `size`, centrado.
+    /// Centered rectangle that fully covers `bounds` while keeping the aspect ratio of `size`.
     static func aspectFill(_ size: CGSize, in bounds: CGRect) -> CGRect {
         let scale = max(bounds.width / max(size.width, 1), bounds.height / max(size.height, 1))
         let fitted = CGSize(width: size.width * scale, height: size.height * scale)

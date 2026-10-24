@@ -1,7 +1,7 @@
 import AppKit
 import ScreenCaptureKit
 
-/// Conversion entre coordenadas globales de AppKit (origen abajo-izquierda) y de CoreGraphics (origen arriba-izquierda).
+/// Conversion between AppKit global coordinates (bottom-left origin) and CoreGraphics ones (top-left origin).
 enum ScreenGeometry {
     static var primaryScreenHeight: CGFloat {
         NSScreen.screens.first?.frame.height ?? 0
@@ -48,7 +48,7 @@ struct ScreenCaptureService {
             return (id: display.displayID, filter: filter, config: config)
         }
 
-        // Las pantallas se capturan a la vez: en serie, con varias pantallas Retina, el overlay tarda en aparecer.
+        // Displays are captured concurrently: serially, with several Retina displays, the overlay is slow to appear.
         return try await withThrowingTaskGroup(of: (CGDirectDisplayID, CGImage).self) { group in
             for request in requests {
                 group.addTask {
@@ -126,7 +126,7 @@ struct ScreenCaptureService {
         guard !chunks.isEmpty else { throw CaptureError.emptyResult }
 
         if chunks.count == 1, let chunk = chunks.first {
-            // Si el area queda parcialmente fuera de las pantallas, el resultado es solo la parte visible.
+            // If the area is partially off-screen, the result is only the visible part.
             return NSImage(cgImage: chunk.image, size: chunk.destination.size)
         }
         let composed = try await Self.compose(chunks, size: selection.size, scale: outputScale)
@@ -137,9 +137,9 @@ struct ScreenCaptureService {
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let scale = options.downscaleToOneX ? 1 : CGFloat(filter.pointPixelScale)
 
-        // La sombra sobresale de la ventana. Si el lienzo mide lo mismo que la ventana, ScreenCaptureKit encoge
-        // la ventana para que quepa la sombra; por eso se captura sin escalar en un lienzo con margen y despues
-        // se recortan los bordes transparentes.
+        // The shadow extends beyond the window. If the canvas is the same size as the window, ScreenCaptureKit shrinks
+        // the window to fit the shadow; so it is captured unscaled on a canvas with a margin and the transparent
+        // edges are trimmed afterwards.
         let margin: CGFloat = options.includeWindowShadow ? Self.shadowMargin : 0
         let canvas = CGSize(width: filter.contentRect.width + margin * 2, height: filter.contentRect.height + margin * 2)
         let config = configuration(for: filter, size: canvas, scale: scale)
@@ -157,8 +157,8 @@ struct ScreenCaptureService {
 
     private static let shadowMargin: CGFloat = 100
 
-    /// Recorta las filas y columnas totalmente transparentes alrededor de la imagen. Se ejecuta fuera del hilo
-    /// principal y solo dibuja el canal alfa (un byte por pixel).
+    /// Trims the fully transparent rows and columns around the image. Runs off the main thread
+    /// and only draws the alpha channel (one byte per pixel).
     @concurrent
     nonisolated static func trimmingTransparentEdges(_ image: CGImage) async -> CGImage? {
         let width = image.width
@@ -195,7 +195,7 @@ struct ScreenCaptureService {
             return false
         }
 
-        // El buffer tiene la primera fila arriba, igual que `cropping(to:)`.
+        // The buffer has the first row at the top, same as `cropping(to:)`.
         guard let top = (0 ..< height).first(where: rowHasContent),
               let bottom = (0 ..< height).reversed().first(where: rowHasContent)
         else { return nil }
@@ -216,7 +216,7 @@ struct ScreenCaptureService {
         return config
     }
 
-    /// Une los trozos de varias pantallas fuera del hilo principal.
+    /// Joins the chunks from several displays off the main thread.
     @concurrent
     nonisolated static func compose(
         _ chunks: [(image: CGImage, destination: CGRect)],
@@ -226,7 +226,7 @@ struct ScreenCaptureService {
         let width = Int((size.width * scale).rounded())
         let height = Int((size.height * scale).rounded())
 
-        // Igual que `CGColorSpace.renderable(for:)`, que esta aislado al hilo principal.
+        // Same as `CGColorSpace.renderable(for:)`, which is isolated to the main thread.
         let firstSpace = chunks.first?.image.colorSpace
         let space = firstSpace?.model == .rgb ? firstSpace : CGColorSpace(name: CGColorSpace.sRGB)
 

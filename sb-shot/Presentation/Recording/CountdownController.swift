@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// Cuenta regresiva grande sobre el area seleccionada antes de grabar o capturar con temporizador.
+/// Large countdown over the selected area before recording or taking a timed capture.
 final class CountdownController: CountdownPresenting {
     private final class Model: ObservableObject {
         @Published var value = 3
@@ -30,8 +30,8 @@ final class CountdownController: CountdownPresenting {
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = FirstMouseHostingView(rootView: CountdownView(model: model) { model.isCancelled = true })
-        // Se activa la app para que Esc llegue al monitor local aunque se haya iniciado con un atajo global.
-        // Al terminar se devuelve el foco a la app que se va a grabar o capturar.
+        // Activate the app so Esc reaches the local monitor even when started from a global shortcut.
+        // When done, focus returns to the app being recorded or captured.
         let previousApp = AppFocus.activate()
         panel.makeKeyAndOrderFront(nil)
 
@@ -78,7 +78,7 @@ final class CountdownController: CountdownPresenting {
                     .fill(Color.black.opacity(0.6))
                 Circle()
                     .strokeBorder(Color.white.opacity(0.25), lineWidth: 2)
-                Text("\(model.value)")
+                Text(verbatim: "\(model.value)")
                     .font(.system(size: 72, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                     .contentTransition(.numericText(countsDown: true))
@@ -88,7 +88,7 @@ final class CountdownController: CountdownPresenting {
             .frame(width: 150, height: 150)
             .contentShape(Circle())
             .onTapGesture(perform: onCancel)
-            .help("Clic o Esc para cancelar")
+            .help("Click or press Esc to cancel")
         }
     }
 }

@@ -44,7 +44,7 @@ struct FileStorageFixesTests {
     @Test func sanitizedPrefixCapsUTF8Length() {
         let long = String(repeating: "a", count: 400)
         #expect(FileStorage.sanitizedPrefix(long).utf8.count <= 150)
-        // Caracteres multibyte: nunca se parte un caracter y se respeta el limite en bytes.
+        // Multibyte characters: a character is never split and the byte limit is respected.
         let emoji = String(repeating: "😀", count: 100)
         let result = FileStorage.sanitizedPrefix(emoji)
         #expect(result.utf8.count <= 150)
@@ -138,7 +138,7 @@ struct HistoryStoreFixesTests {
             try? FileManager.default.removeItem(at: dir)
             try? FileManager.default.removeItem(at: srcDir)
         }
-        let corrupt = Data("{ esto no es json".utf8)
+        let corrupt = Data("{ this is not json".utf8)
         try corrupt.write(to: dir.appendingPathComponent("index.json"))
 
         let store = HistoryStore(directory: dir)
@@ -148,7 +148,7 @@ struct HistoryStoreFixesTests {
 
         store.add(fileURL: file, kind: .image)
         #expect(store.entries.count == 1)
-        // El respaldo sigue intacto y el nuevo indice es valido.
+        // The backup is still intact and the new index is valid.
         #expect(try Data(contentsOf: backup) == corrupt)
         let reloaded = HistoryStore(directory: dir)
         #expect(reloaded.entries.count == 1)
@@ -164,7 +164,7 @@ struct HistoryStoreFixesTests {
         let json = """
         [
           {"fileName": "a.mp4"},
-          {"id": "\(id.uuidString)", "fileName": "b.gif", "kind": "raro", "createdAt": "no-es-fecha"},
+          {"id": "\(id.uuidString)", "fileName": "b.gif", "kind": "weird", "createdAt": "not-a-date"},
           {"kind": "image"},
           {"fileName": "c.png", "kind": "image", "createdAt": 1000}
         ]
@@ -179,7 +179,7 @@ struct HistoryStoreFixesTests {
         #expect(byName["b.gif"]?.kind == .gif)
         #expect(byName["b.gif"]?.id == id)
         #expect(byName["c.png"]?.kind == .image)
-        // Nada se movio a respaldo: el indice era legible.
+        // Nothing was moved to backup: the index was readable.
         #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("index.json.bak").path))
     }
 
@@ -228,7 +228,7 @@ struct ToastControllerFixesTests {
         toast.show("Uno", systemImage: "checkmark")
         toast.hide()
         toast.show("Dos", systemImage: "checkmark")
-        // Espera a que termine el fundido (0.2 s) del primer hide.
+        // Waits for the first hide's fade-out (0.2 s) to finish.
         try? await Task.sleep(nanoseconds: 700_000_000)
         #expect(toast.hasPanel)
         toast.hide()
@@ -243,7 +243,7 @@ struct ToastControllerFixesTests {
 struct HotkeyManagerFixesTests {
     @Test func duplicateCombinationFailsAndIsNotStoredAsRegistered() {
         let manager = HotkeyManager()
-        // Combinacion improbable de estar en uso por el sistema.
+        // Combination unlikely to be in use by the system.
         let combo = GlobalShortcut(keyCode: 0x50, modifiers: [.command, .option, .control, .shift])
         manager.register([.captureArea: combo, .captureWindow: combo])
 
@@ -253,7 +253,7 @@ struct HotkeyManagerFixesTests {
         #expect(manager.registered[failed] == nil)
         #expect(Set(manager.registered.keys).isDisjoint(with: manager.failedActions))
 
-        // Al volver a registrar sin conflicto se limpian los fallos.
+        // Registering again without conflict clears the failures.
         manager.register([.captureArea: combo])
         #expect(manager.failedActions.isEmpty)
         #expect(manager.registered.keys.contains(.captureArea))

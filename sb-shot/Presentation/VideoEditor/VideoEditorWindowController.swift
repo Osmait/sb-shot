@@ -3,7 +3,7 @@ import AVKit
 import Combine
 import SwiftUI
 
-/// Recorta una grabacion con una barra de fotogramas y la exporta a MP4 o GIF desde un panel lateral.
+/// Trims a recording with a filmstrip bar and exports it to MP4 or GIF from a side panel.
 final class VideoEditorWindowController: NSWindowController, NSWindowDelegate {
     var onClose: (() -> Void)?
 
@@ -21,7 +21,7 @@ final class VideoEditorWindowController: NSWindowController, NSWindowDelegate {
         )
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.title = "Editar grabación"
+        window.title = String(localized: "Edit Recording")
         window.appearance = NSAppearance(named: .darkAqua)
         window.backgroundColor = NSColor(EditorColors.windowBackground)
         window.minSize = NSSize(width: 900, height: 560)
@@ -55,7 +55,7 @@ final class VideoEditorWindowController: NSWindowController, NSWindowDelegate {
         onClose?()
     }
 
-    /// Espacio reproduce o pausa; I y O fijan el inicio y el fin en la posicion actual.
+    /// Space plays or pauses; I and O set the start and end at the current position.
     private func installKeyMonitor() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -85,7 +85,7 @@ enum VideoQuality: CaseIterable {
         switch (format, self) {
         case (.mp4, .small): "720p"
         case (.mp4, .medium): "1080p"
-        case (.mp4, .original): "Original"
+        case (.mp4, .original): String(localized: "Original")
         case (.gif, .small): "480 px"
         case (.gif, .medium): "720 px"
         case (.gif, .original): "960 px"
@@ -109,7 +109,7 @@ enum VideoQuality: CaseIterable {
     }
 }
 
-/// Tiempo de reproduccion aparte del modelo: cambia ~30 veces por segundo y solo lo observan el cabezal y el contador.
+/// Playback time kept apart from the model: it changes ~30 times per second and only the playhead and counter observe it.
 @MainActor
 final class PlaybackClock: ObservableObject {
     @Published var time: Double = 0
@@ -194,7 +194,7 @@ final class VideoEditorModel: ObservableObject {
     }
 
     var estimatedSize: String {
-        guard format == .mp4, duration > 0, fileSize > 0 else { return "Al exportar" }
+        guard format == .mp4, duration > 0, fileSize > 0 else { return String(localized: "On export") }
 
         var bytes = Double(fileSize) * trimLength / duration
         if let maxHeight = quality.maxVideoHeight, sourcePixelHeight > maxHeight {
@@ -225,7 +225,7 @@ final class VideoEditorModel: ObservableObject {
         player.seek(to: CMTime(seconds: clamped, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
-    /// Sin duracion cargada o con clips mas cortos que el minimo no hay recorte posible.
+    /// Trimming isn't possible without a loaded duration or with clips shorter than the minimum.
     func setTrimStart(_ seconds: Double) {
         guard duration >= Self.minimumLength else { return }
         trimStart = max(min(seconds, trimEnd - Self.minimumLength), 0)
@@ -256,7 +256,7 @@ final class VideoEditorModel: ObservableObject {
 
     // MARK: Background
 
-    /// Estilo del fondo para Core Image, o `nil` si esta desactivado.
+    /// Background style for Core Image, or `nil` when disabled.
     var backgroundStyle: VideoBackgroundStyle? {
         guard background.isEnabled else { return nil }
         let colors = background.preset.colors.map(\.cgColorValue)
@@ -277,14 +277,14 @@ final class VideoEditorModel: ObservableObject {
         background = updated
     }
 
-    /// Aplica el fondo a la reproduccion. Se agrupan los cambios seguidos de los sliders.
+    /// Applies the background to playback. Rapid slider changes are coalesced.
     private func scheduleBackgroundPreview() {
         previewTask?.cancel()
         previewTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 120_000_000)
             guard !Task.isCancelled, let self, let item = player.currentItem else { return }
 
-            // El estilo desenfoca el fondo de pantalla: se calcula tras la espera para no hacerlo en cada tick del slider.
+            // The style blurs the wallpaper: compute it after the delay so it doesn't run on every slider tick.
             if let style = backgroundStyle {
                 item.videoComposition = try? await VideoBackgroundCompositor.makeComposition(for: item.asset, style: style)
             } else {
@@ -324,14 +324,14 @@ final class VideoEditorModel: ObservableObject {
         isPlaying = false
         isExporting = true
 
-        // Cada exportacion va a su propia carpeta temporal: no pisa un archivo ya copiado o pegado
-        // ni choca con otro editor de la misma grabacion, y conserva un nombre legible.
+        // Each export goes to its own temporary folder: it doesn't overwrite a file already copied or pasted,
+        // doesn't clash with another editor for the same recording, and keeps a readable name.
         let base = videoURL.deletingPathExtension().lastPathComponent
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("sb-shot", isDirectory: true)
             .appendingPathComponent("export-\(UUID().uuidString)", isDirectory: true)
         let output = folder
-            .appendingPathComponent("\(base) recorte")
+            .appendingPathComponent(String(localized: "\(base) trimmed"))
             .appendingPathExtension(format == .gif ? "gif" : "mp4")
 
         exportTask?.cancel()
@@ -361,7 +361,7 @@ final class VideoEditorModel: ObservableObject {
                         background: style
                     )
                 }
-                // Si la ventana se cerro durante la exportacion no se copia ni se guarda nada.
+                // If the window was closed during export, nothing is copied or saved.
                 guard !Task.isCancelled else {
                     try? FileManager.default.removeItem(at: folder)
                     return
@@ -420,7 +420,7 @@ final class VideoEditorModel: ObservableObject {
         return String(format: "%d:%04.1f", minutes, rest)
     }
 
-    /// Acepta "1:02.5", "62.5" o "62".
+    /// Accepts "1:02.5", "62.5" or "62".
     static func parseTime(_ text: String) -> Double? {
         let parts = text.replacingOccurrences(of: ",", with: ".").split(separator: ":")
         switch parts.count {
@@ -494,15 +494,15 @@ private struct VideoEditorView: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .help("Reproducir o pausar (Espacio)")
+            .help("Play or pause (Space)")
 
-            TimeField(title: "Inicio", value: model.trimStart, onCommit: model.setTrimStart)
-                .help("Fija el inicio en la posición actual con I")
-            TimeField(title: "Fin", value: model.trimEnd, onCommit: model.setTrimEnd)
-                .help("Fija el fin en la posición actual con O")
+            TimeField(title: String(localized: "Start"), value: model.trimStart, onCommit: model.setTrimStart)
+                .help("Press I to set the start at the current position")
+            TimeField(title: String(localized: "End"), value: model.trimEnd, onCommit: model.setTrimEnd)
+                .help("Press O to set the end at the current position")
 
             if model.isTrimmed {
-                Button("Restablecer", action: model.resetTrim)
+                Button("Reset", action: model.resetTrim)
                     .buttonStyle(ActionButtonStyle(isPrimary: false))
             }
 
@@ -518,13 +518,13 @@ private struct PlaybackTimeLabel: View {
     let duration: Double
 
     var body: some View {
-        Text("\(VideoEditorModel.timeString(clock.time)) / \(VideoEditorModel.timeString(duration))")
+        Text(verbatim: "\(VideoEditorModel.timeString(clock.time)) / \(VideoEditorModel.timeString(duration))")
             .font(.system(size: 12).monospacedDigit())
             .foregroundStyle(.secondary)
     }
 }
 
-/// Cabezal de la barra de recorte; es lo unico de la barra que se redibuja durante la reproduccion.
+/// Trim bar playhead; it's the only part of the bar redrawn during playback.
 private struct Playhead: View {
     @ObservedObject var clock: PlaybackClock
     let duration: Double
@@ -542,7 +542,7 @@ private struct Playhead: View {
     }
 }
 
-/// Barra de recorte: tira de fotogramas, asas de inicio y fin, zona descartada oscurecida y cabezal.
+/// Trim bar: filmstrip, start and end handles, dimmed discarded area and playhead.
 private struct TrimBar: View {
     @ObservedObject var model: VideoEditorModel
 
@@ -584,12 +584,12 @@ private struct TrimBar: View {
                 handle(height: height)
                     .offset(x: startX)
                     .gesture(handleGesture(width: width) { model.setTrimStart($0) })
-                    .help("Arrastra para fijar el inicio")
+                    .help("Drag to set the start")
 
                 handle(height: height)
                     .offset(x: endX - handleWidth)
                     .gesture(handleGesture(width: width) { model.setTrimEnd($0) })
-                    .help("Arrastra para fijar el fin")
+                    .help("Drag to set the end")
 
                 Playhead(clock: model.clock, duration: model.duration, width: width, height: height)
             }
@@ -691,7 +691,7 @@ private struct ExportPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Exportar")
+            Text("Export")
                 .font(.system(size: 15, weight: .bold))
                 .padding(.top, 40)
 
@@ -713,32 +713,32 @@ private struct ExportPanel: View {
     @ViewBuilder
     private var settingsSections: some View {
         VStack(alignment: .leading, spacing: 8) {
-            InspectorTitle("Formato")
+            InspectorTitle(String(localized: "Format"))
             HStack(spacing: 8) {
-                formatCard(.mp4, title: "MP4", subtitle: "Video con audio")
-                formatCard(.gif, title: "GIF", subtitle: "Animación sin audio")
+                formatCard(.mp4, title: "MP4", subtitle: String(localized: "Video with audio"))
+                formatCard(.gif, title: "GIF", subtitle: String(localized: "Animation without audio"))
             }
         }
 
         VStack(alignment: .leading, spacing: 8) {
-            InspectorTitle(model.format == .gif ? "Tamaño y fluidez" : "Calidad")
+            InspectorTitle(model.format == .gif ? String(localized: "Size and Smoothness") : String(localized: "Quality"))
             ChipRow(options: VideoQuality.allCases, selection: $model.quality) { $0.title(for: model.format) }
-            ChipRow(options: model.fpsOptions, selection: $model.framesPerSecond) { "\($0) fps" }
+            ChipRow(options: model.fpsOptions, selection: $model.framesPerSecond) { String(localized: "\($0) fps") }
         }
 
         VStack(alignment: .leading, spacing: 10) {
-            InspectorTitle("Audio")
+            InspectorTitle(String(localized: "Audio"))
             if model.format == .gif {
-                Text("Los GIF no llevan audio.")
+                Text("GIFs don’t include audio.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             } else if model.hasAudio {
                 Toggle(isOn: $model.includeAudio) {
-                    Text("Incluir audio").font(.system(size: 13))
+                    Text("Include audio").font(.system(size: 13))
                 }
                 .toggleStyle(.checkbox)
             } else {
-                Text("Esta grabación no tiene audio.")
+                Text("This recording has no audio.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
@@ -748,10 +748,10 @@ private struct ExportPanel: View {
     @ViewBuilder
     private var footer: some View {
         HStack {
-            Text("Duración ").foregroundStyle(.secondary)
+            Text("Duration ").foregroundStyle(.secondary)
                 + Text(String(format: "%.1f s", model.trimLength)).fontWeight(.semibold)
             Spacer()
-            Text("Tamaño ").foregroundStyle(.secondary)
+            Text("Size ").foregroundStyle(.secondary)
                 + Text(model.estimatedSize).fontWeight(.semibold)
         }
         .font(.system(size: 12))
@@ -760,7 +760,7 @@ private struct ExportPanel: View {
 
         HStack(spacing: 8) {
             Button(action: model.save) {
-                Text("Guardar").frame(maxWidth: .infinity)
+                Text("Save").frame(maxWidth: .infinity)
             }
             .buttonStyle(ActionButtonStyle(isPrimary: false))
 
@@ -769,7 +769,7 @@ private struct ExportPanel: View {
                     if model.isExporting {
                         ProgressView().controlSize(.small)
                     } else {
-                        Text("Copiar")
+                        Text("Copy")
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -798,7 +798,7 @@ private struct ExportPanel: View {
     }
 }
 
-/// Fondo del video: degradado o fondo de pantalla, margen, esquinas, sombra y proporcion, como en el editor de capturas.
+/// Video background: gradient or wallpaper, padding, corners, shadow and aspect ratio, as in the screenshot editor.
 private struct VideoBackgroundSection: View {
     @ObservedObject var model: VideoEditorModel
 
@@ -809,9 +809,9 @@ private struct VideoBackgroundSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                InspectorTitle("Fondo")
+                InspectorTitle(String(localized: "Background"))
                 Spacer()
-                Toggle("Fondo", isOn: Binding(
+                Toggle("Background", isOn: Binding(
                     get: { background.isEnabled },
                     set: { value in model.updateBackground { $0.isEnabled = value } }
                 ))
@@ -850,22 +850,22 @@ private struct VideoBackgroundSection: View {
             }
 
             if background.wallpaper != nil {
-                InspectorSlider(title: "Desenfoque", value: binding(\.wallpaperBlur), range: 0 ... 40)
+                InspectorSlider(title: String(localized: "Blur"), value: binding(\.wallpaperBlur), range: 0 ... 40)
             }
 
-            InspectorSlider(title: "Margen", value: binding(\.padding), range: 0 ... 200)
-            InspectorSlider(title: "Esquinas", value: binding(\.cornerRadius), range: 0 ... 40)
+            InspectorSlider(title: String(localized: "Padding"), value: binding(\.padding), range: 0 ... 200)
+            InspectorSlider(title: String(localized: "Corners"), value: binding(\.cornerRadius), range: 0 ... 40)
 
             Toggle(isOn: Binding(
                 get: { background.shadow },
                 set: { value in model.updateBackground { $0.shadow = value } }
             )) {
-                Text("Sombra").font(.system(size: 12))
+                Text("Shadow").font(.system(size: 12))
             }
             .toggleStyle(.checkbox)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Proporción")
+                Text("Aspect Ratio")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                 ChipRow(
@@ -912,3 +912,12 @@ private struct PlayerViewRepresentable: NSViewRepresentable {
 
     func updateNSView(_: AVPlayerView, context _: Context) {}
 }
+
+#if DEBUG
+extension VideoEditorWindowController {
+    /// Demo mode: access to the model to configure the background.
+    var demoModel: VideoEditorModel {
+        model
+    }
+}
+#endif

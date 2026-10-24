@@ -1,7 +1,7 @@
 import AppKit
 
 struct QuickAccessActions {
-    /// Archivo actual para arrastrar (la copia guardada, si ya se guardo).
+    /// Current file to drag (the saved copy, if it was already saved).
     let fileURL: () -> URL
     let onCopy: () -> Void
     let onSave: () -> Void
@@ -17,10 +17,10 @@ struct EditorActions {
 }
 
 struct VideoEditorActions {
-    /// Reciben el archivo ya exportado (MP4 o GIF).
+    /// Receive the already exported file (MP4 or GIF).
     let onCopy: (URL) -> Void
     let onSave: (URL) -> Void
-    /// Valores iniciales del panel de exportacion, tomados de los ajustes.
+    /// Initial values for the export panel, taken from the settings.
     let defaultFormat: RecordingFormat
     let gifFramesPerSecond: Int
 }
@@ -53,7 +53,7 @@ protocol HistoryPresenting: AnyObject {
 }
 
 protocol RecordingControlsPresenting: AnyObject {
-    /// Muestra el borde y la barra de control (la grabacion excluye todas las ventanas de la app).
+    /// Shows the border and the control bar (the recording excludes all app windows).
     func show(for selection: ScreenSelection, onStop: @escaping () -> Void, onRestart: @escaping () -> Void, onCancel: @escaping () -> Void)
     func update(elapsed: TimeInterval)
     func hide()

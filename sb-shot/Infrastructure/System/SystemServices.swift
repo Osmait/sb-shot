@@ -22,7 +22,7 @@ enum LaunchAtLogin {
         SMAppService.mainApp.status
     }
 
-    /// Activado, o registrado y a la espera de que el usuario lo apruebe en Ajustes del Sistema.
+    /// Enabled, or registered and waiting for the user to approve it in System Settings.
     static var isOn: Bool {
         status == .enabled || status == .requiresApproval
     }

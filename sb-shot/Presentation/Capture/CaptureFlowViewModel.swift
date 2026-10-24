@@ -64,22 +64,22 @@ final class CaptureFlowViewModel: ObservableObject {
                 return
             }
 
-            toast.showProgress("Reconociendo texto…")
+            toast.showProgress(String(localized: "Recognizing text…"))
             do {
                 let text = try await textRecognizer.recognizeText(in: image)
                 output.handleRecognizedText(text)
             } catch {
-                toast.show("No se pudo reconocer el texto", systemImage: "exclamationmark.triangle")
+                toast.show(String(localized: "Couldn't recognize the text"), systemImage: "exclamationmark.triangle")
             }
         }
     }
 
-    /// Abre una imagen del disco en el editor.
+    /// Opens an image from disk in the editor.
     func annotateImageFile() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.image]
         panel.allowsMultipleSelection = false
-        panel.message = "Elige una imagen para anotar"
+        panel.message = String(localized: "Choose an image to annotate")
 
         NSApp.activate(ignoringOtherApps: true)
         guard panel.runModal() == .OK, let url = panel.url, let image = NSImage(contentsOf: url) else { return }
@@ -96,9 +96,9 @@ final class CaptureFlowViewModel: ObservableObject {
         case .cancelled:
             break
         case .permissionDenied:
-            toast.show("Activa Grabación de pantalla en Ajustes del Sistema", systemImage: "lock.shield")
+            toast.show(String(localized: "Turn on Screen Recording in System Settings"), systemImage: "lock.shield")
         case .failed:
-            toast.show("No se pudo capturar", systemImage: "exclamationmark.triangle")
+            toast.show(String(localized: "Couldn't capture the screen"), systemImage: "exclamationmark.triangle")
         }
     }
 }

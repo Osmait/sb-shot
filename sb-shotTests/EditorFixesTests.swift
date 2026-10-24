@@ -10,7 +10,7 @@ struct EditorUndoCoalescingTests {
         CaptureEditorViewModel(baseImage: NSImage(size: NSSize(width: 400, height: 300)))
     }
 
-    /// Dibuja un rectangulo (queda seleccionado) y devuelve su viewmodel.
+    /// Draws a rectangle (left selected) and returns its view model.
     private func makeViewModelWithRectangle() -> CaptureEditorViewModel {
         let viewModel = makeViewModel()
         viewModel.activeTool = .rectangle
@@ -20,7 +20,7 @@ struct EditorUndoCoalescingTests {
         return viewModel
     }
 
-    /// Deshace hasta agotar la pila y devuelve cuantos pasos habia.
+    /// Undoes until the stack is exhausted and returns how many steps there were.
     private func undoAll(_ viewModel: CaptureEditorViewModel) -> Int {
         var steps = 0
         while viewModel.canUndo, steps < 200 {
@@ -43,7 +43,7 @@ struct EditorUndoCoalescingTests {
         #expect(viewModel.document.annotations[0].style.lineWidth == original)
         #expect(viewModel.document.annotations.count == 1)
 
-        // Queda solo la creacion del rectangulo.
+        // Only the rectangle creation remains.
         #expect(undoAll(viewModel) == 1)
     }
 
@@ -70,11 +70,11 @@ struct EditorUndoCoalescingTests {
 
         viewModel.lineWidth = 6
         viewModel.lineWidth = 7
-        viewModel.fillShapes = true // paso propio
+        viewModel.fillShapes = true // own step
         viewModel.lineWidth = 9
         viewModel.lineWidth = 10
 
-        // rectangulo + grupo(6,7) + relleno + grupo(9,10)
+        // rectangle + group(6,7) + fill + group(9,10)
         #expect(undoAll(viewModel) == 4)
     }
 
@@ -86,11 +86,11 @@ struct EditorUndoCoalescingTests {
         viewModel.undo()
         #expect(viewModel.document.annotations[0].style.lineWidth == original)
 
-        // Tras deshacer, un nuevo cambio abre un grupo nuevo (y descarta el rehacer).
+        // After undoing, a new change opens a new group (and discards the redo stack).
         viewModel.lineWidth = 7
         #expect(viewModel.canRedo == false)
         viewModel.lineWidth = 9
-        #expect(undoAll(viewModel) == 2) // rectangulo + grupo(7,9)
+        #expect(undoAll(viewModel) == 2) // rectangle + group(7,9)
 
         viewModel.redo()
         viewModel.redo()
@@ -167,7 +167,7 @@ struct EditorEmptyTextTests {
         let viewModel = makeViewModel()
         draw(viewModel, from: CGPoint(x: 10, y: 10), to: CGPoint(x: 60, y: 60))
         draw(viewModel, from: CGPoint(x: 100, y: 100), to: CGPoint(x: 160, y: 160))
-        viewModel.undo() // 1 en undo, 1 en redo
+        viewModel.undo() // 1 in undo, 1 in redo
         let documentBefore = viewModel.document
 
         viewModel.activeTool = .text
@@ -209,7 +209,7 @@ struct EditorEmptyTextTests {
         viewModel.pointerDown(at: CGPoint(x: 250, y: 200), tolerance: 4, clickCount: 1)
         viewModel.undo()
 
-        // El rectangulo sigue ahi: el deshacer solo descarto el texto vacio.
+        // The rectangle is still there: undo only discarded the empty text.
         #expect(viewModel.document.annotations.count == 1)
         #expect(viewModel.canUndo)
     }

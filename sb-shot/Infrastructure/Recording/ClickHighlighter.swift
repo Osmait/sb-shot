@@ -1,12 +1,12 @@
 import AppKit
 import QuartzCore
 
-/// Dibuja un circulo animado en cada clic mientras se graba. Sus ventanas si aparecen en el video.
+/// Draws an animated circle on every click while recording. Its windows do appear in the video.
 final class ClickHighlighter {
     private var windows: [NSWindow] = []
     private var monitors: [Any] = []
 
-    /// Ventanas que deben aparecer en la grabacion.
+    /// Windows that must appear in the recording.
     var windowNumbers: [Int] {
         windows.map(\.windowNumber)
     }

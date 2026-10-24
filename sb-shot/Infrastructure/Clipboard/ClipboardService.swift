@@ -1,9 +1,9 @@
 import AppKit
 
-/// Portapapeles con datos ya codificados, para no volver a codificar la imagen.
+/// Clipboard with already encoded data, to avoid re-encoding the image.
 protocol ImageFileClipboardWriting: ClipboardWriting {
     func copy(pngData: Data, fileURL: URL?)
-    /// Copia la imagen de un archivo (PNG y referencia al archivo). Devuelve `false` si no se pudo leer.
+    /// Copies the image of a file (PNG plus a file reference). Returns `false` if it could not be read.
     @discardableResult
     func copyImageFile(at url: URL) -> Bool
 }
@@ -21,7 +21,7 @@ struct ClipboardService {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
 
-        // PNG para pegar la imagen y la URL del archivo para pegarlo en Finder o adjuntarlo.
+        // PNG to paste the image, and the file URL to paste it in Finder or attach it.
         let item = NSPasteboardItem()
         item.setData(pngData, forType: .png)
         if let fileURL {
@@ -37,7 +37,7 @@ struct ClipboardService {
             return true
         }
 
-        // Otros formatos (JPEG) se convierten a PNG, que es lo que aceptan todas las apps.
+        // Other formats (JPEG) are converted to PNG, which every app accepts.
         guard
             let image = NSImage(contentsOf: url),
             let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),

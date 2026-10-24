@@ -2,7 +2,7 @@ import AppKit
 @testable import SbShot
 import Testing
 
-// MARK: - Dobles propios (los de SbShotTests.swift son privados)
+// MARK: - Own test doubles (the ones in SbShotTests.swift are private)
 
 private final class FixPermissions: ScreenPermissionChecking {
     let alreadyRequested: Bool
@@ -51,7 +51,7 @@ private final class FixCapturer: ScreenCaptureProviding {
     }
 }
 
-/// `displaySnapshots` queda suspendido hasta que alguien reanude la continuacion.
+/// `displaySnapshots` stays suspended until someone resumes the continuation.
 private final class SuspendingCapturer: ScreenCaptureProviding {
     private(set) var snapshotCalls = 0
     private(set) var hidingFlags: [Bool] = []
@@ -72,7 +72,7 @@ private final class SuspendingCapturer: ScreenCaptureProviding {
     }
 }
 
-// MARK: - Helpers de imagenes
+// MARK: - Image helpers
 
 private func makeRGBAImage(width: Int, height: Int, draw: (CGContext) -> Void) -> CGImage {
     let context = CGContext(
@@ -84,7 +84,7 @@ private func makeRGBAImage(width: Int, height: Int, draw: (CGContext) -> Void) -
     return context.makeImage()!
 }
 
-/// Lee un pixel RGBA (origen arriba a la izquierda) redibujando la imagen en un buffer conocido.
+/// Reads an RGBA pixel (top-left origin) by redrawing the image into a known buffer.
 private func pixel(_ image: CGImage, x: Int, y: Int) -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8) {
     var data = [UInt8](repeating: 0, count: image.width * image.height * 4)
     data.withUnsafeMutableBytes { buffer in
@@ -99,7 +99,7 @@ private func pixel(_ image: CGImage, x: Int, y: Int) -> (r: UInt8, g: UInt8, b: 
     return (data[i], data[i + 1], data[i + 2], data[i + 3])
 }
 
-// MARK: - 1 y 2: caso de uso
+// MARK: - 1 and 2: use case
 
 @MainActor
 struct CaptureFixesUseCaseTests {
@@ -138,7 +138,7 @@ struct CaptureFixesUseCaseTests {
     }
 
     @Test func frozenImageIsDownscaledToOnePixelPerPointWhenRequested() async throws {
-        // Instantanea 2x de un area de 100x50 pt: 200x100 px.
+        // 2x snapshot of a 100x50 pt area: 200x100 px.
         let cg = makeRGBAImage(width: 200, height: 100) { context in
             context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
             context.fill(CGRect(x: 0, y: 0, width: 200, height: 100))
@@ -205,12 +205,12 @@ private struct GrantedPermissions: ScreenPermissionChecking {
     func openScreenRecordingSettings() {}
 }
 
-// MARK: - 3: selector con flag de ocupado
+// MARK: - 3: selector with busy flag
 
 @MainActor
 struct SelectionOverlayRegionSelectorBusyTests {
-    /// La primera llamada queda suspendida en `displaySnapshots` (nunca se reanuda, para no abrir overlays reales
-    /// al terminar); la segunda debe devolver nil de inmediato sin pedir otra captura.
+    /// The first call stays suspended in `displaySnapshots` (never resumed, so no real overlays are opened
+    /// when finished); the second must return nil immediately without requesting another capture.
     @Test func secondSelectWhileFirstAwaitsSnapshotsReturnsNil() async {
         let capturer = SuspendingCapturer()
         let selector = SelectionOverlayRegionSelector(capturer: capturer)
@@ -225,21 +225,21 @@ struct SelectionOverlayRegionSelectorBusyTests {
 
         #expect(second == nil)
         #expect(capturer.snapshotCalls == 1)
-        // Con congelado + ocultar iconos, se pide la instantanea sin iconos.
+        // With freeze + hide icons, the snapshot is requested without icons.
         #expect(capturer.hidingFlags == [true])
         _ = first
     }
 }
 
-// MARK: - 4: recorte y composicion
+// MARK: - 4: cropping and compositing
 
 @MainActor
 struct ScreenCaptureImageProcessingTests {
     @Test func trimsTransparentMarginsToOpaqueBounds() async throws {
-        // 40x30 transparente con un bloque opaco x 10..<25, y 5..<20 (origen arriba-izquierda).
+        // 40x30 transparent with an opaque block x 10..<25, y 5..<20 (top-left origin).
         let image = makeRGBAImage(width: 40, height: 30) { context in
             context.setFillColor(CGColor(red: 0, green: 1, blue: 0, alpha: 1))
-            // CGContext tiene origen abajo: y superior 5 => y inferior = 30 - 20 = 10.
+            // CGContext has a bottom origin: top y 5 => bottom y = 30 - 20 = 10.
             context.fill(CGRect(x: 10, y: 10, width: 15, height: 15))
         }
 
@@ -252,7 +252,7 @@ struct ScreenCaptureImageProcessingTests {
     }
 
     @Test func trimKeepsAsymmetricMarginsPositionCorrect() async throws {
-        // Franja opaca de 4x2 pegada al borde superior izquierdo, resto transparente.
+        // Opaque 4x2 strip at the top-left edge, rest transparent.
         let image = makeRGBAImage(width: 20, height: 10) { context in
             context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
             context.fill(CGRect(x: 0, y: 8, width: 4, height: 2))
@@ -293,7 +293,7 @@ struct ScreenCaptureImageProcessingTests {
             context.setFillColor(CGColor(red: 0, green: 0, blue: 1, alpha: 1))
             context.fill(CGRect(x: 0, y: 0, width: 10, height: 10))
         }
-        // Lienzo 20x10 pt; rojo a la izquierda, azul a la derecha (coordenadas con origen arriba).
+        // Canvas 20x10 pt; red on the left, blue on the right (top-origin coordinates).
         let chunks: [(image: CGImage, destination: CGRect)] = [
             (red, CGRect(x: 0, y: 0, width: 10, height: 10)),
             (blue, CGRect(x: 10, y: 0, width: 10, height: 10)),
@@ -314,7 +314,7 @@ struct ScreenCaptureImageProcessingTests {
             context.setFillColor(CGColor(red: 0, green: 1, blue: 0, alpha: 1))
             context.fill(CGRect(x: 0, y: 0, width: 20, height: 20))
         }
-        // Lienzo 10x10 pt a 2x = 20x20 px; el trozo ocupa la mitad inferior (y=5..10 pt, origen arriba).
+        // Canvas 10x10 pt at 2x = 20x20 px; the piece fills the bottom half (y=5..10 pt, top origin).
         let chunks: [(image: CGImage, destination: CGRect)] = [(green, CGRect(x: 0, y: 5, width: 10, height: 5))]
 
         let composed = try await ScreenCaptureService.compose(chunks, size: CGSize(width: 10, height: 10), scale: 2)

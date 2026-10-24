@@ -3,15 +3,15 @@ import AVFoundation
 @testable import SbShot
 import Testing
 
-/// Pruebas de integracion reales: capturan y graban la pantalla principal.
-/// Requieren permiso de grabacion de pantalla y la sesion desbloqueada, por eso solo se ejecutan con:
+/// Real integration tests: they capture and record the main screen.
+/// They require screen recording permission and an unlocked session, so they only run with:
 ///
 ///     TEST_RUNNER_SBSHOT_INTEGRATION=1 xcodebuild test -scheme SbShot -only-testing:SbShotTests/RecordingIntegrationTests
 @MainActor
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["SBSHOT_INTEGRATION"] != nil))
 struct RecordingIntegrationTests {
     @Test func recordsAreaAndDisplayAndExportsGIF() async throws {
-        try #require(CGPreflightScreenCaptureAccess(), "Falta el permiso de grabación de pantalla")
+        try #require(CGPreflightScreenCaptureAccess(), "Screen recording permission is missing")
 
         let screen = try #require(NSScreen.screens.first)
         let displayID = try #require(ScreenGeometry.displayID(of: screen))
@@ -40,7 +40,7 @@ struct RecordingIntegrationTests {
     }
 
     @Test func exportsTrimmedVideoAtLowerResolutionAndFrameRate() async throws {
-        try #require(CGPreflightScreenCaptureAccess(), "Falta el permiso de grabación de pantalla")
+        try #require(CGPreflightScreenCaptureAccess(), "Screen recording permission is missing")
         let screen = try #require(NSScreen.screens.first)
         let displayID = try #require(ScreenGeometry.displayID(of: screen))
 
@@ -64,7 +64,7 @@ struct RecordingIntegrationTests {
     }
 
     @Test func exportsVideoWithBackground() async throws {
-        try #require(CGPreflightScreenCaptureAccess(), "Falta el permiso de grabación de pantalla")
+        try #require(CGPreflightScreenCaptureAccess(), "Screen recording permission is missing")
         let screen = try #require(NSScreen.screens.first)
         let area = CGRect(x: screen.frame.minX + 100, y: screen.frame.minY + 100, width: 800, height: 500)
 
@@ -96,11 +96,11 @@ struct RecordingIntegrationTests {
             space: sRGB, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ))
         context.draw(corner, in: CGRect(x: 0, y: 0, width: 1, height: 1))
-        #expect(pixel[0] > 200 && pixel[1] < 60 && pixel[2] < 60, "La esquina debería ser del fondo rojo")
+        #expect(pixel[0] > 200 && pixel[1] < 60 && pixel[2] < 60, "The corner should be the red background")
     }
 
     @Test func capturesAreaAtNativeResolution() async throws {
-        try #require(CGPreflightScreenCaptureAccess(), "Falta el permiso de grabación de pantalla")
+        try #require(CGPreflightScreenCaptureAccess(), "Screen recording permission is missing")
 
         let service = ScreenCaptureService()
         let screen = try #require(NSScreen.screens.first)
@@ -116,8 +116,8 @@ struct RecordingIntegrationTests {
     }
 
     @Test func capturesWindowWithAndWithoutShadow() async throws {
-        try #require(CGPreflightScreenCaptureAccess(), "Falta el permiso de grabación de pantalla")
-        let window = try #require(OverlayWindowInfo.onScreenWindows().first, "No hay ventanas visibles")
+        try #require(CGPreflightScreenCaptureAccess(), "Screen recording permission is missing")
+        let window = try #require(OverlayWindowInfo.onScreenWindows().first, "No visible windows")
 
         let service = ScreenCaptureService()
         var options = CaptureOptions()
@@ -128,7 +128,7 @@ struct RecordingIntegrationTests {
         let shadowed = try await service.capture(.window(id: window.id, frame: window.frame), options: options)
 
         #expect(abs(plain.size.width - window.frame.width) <= 1)
-        // La sombra agranda la imagen en lugar de encoger la ventana.
+        // The shadow enlarges the image instead of shrinking the window.
         #expect(shadowed.size.width > plain.size.width + 10)
         #expect(shadowed.size.height > plain.size.height + 10)
     }

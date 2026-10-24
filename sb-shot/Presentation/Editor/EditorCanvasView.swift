@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Lienzo del editor. Dibuja el documento con el mismo renderer que la exportacion y traduce el raton
-/// a coordenadas de la imagen.
+/// Editor canvas. Draws the document with the same renderer as the export and converts mouse input
+/// to image coordinates.
 struct EditorCanvasView: View {
     @ObservedObject var viewModel: CaptureEditorViewModel
 
@@ -65,8 +65,8 @@ struct EditorCanvasView: View {
             return
         }
 
-        // Sin fondo la sombra sale del alfa del contenido, asi las zonas transparentes (sombra de una ventana,
-        // esquinas redondeadas) se ven como en la imagen exportada en vez de sobre un rectangulo negro.
+        // Without a background the shadow comes from the content's alpha, so transparent areas (a window's shadow,
+        // rounded corners) look like in the exported image instead of sitting on a black rectangle.
         var shadowContext = context
         shadowContext.addFilter(.shadow(color: .black.opacity(0.45), radius: 18, y: 4))
         shadowContext.drawLayer { layer in
@@ -84,9 +84,9 @@ struct EditorCanvasView: View {
             let bounds = transform.toView(layout.toOutput(annotation.bounds)).insetBy(dx: -4, dy: -4)
             context.stroke(Path(roundedRect: bounds, cornerRadius: 3), with: .color(accent), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
         } else if case .line = annotation.kind {
-            // Las lineas solo muestran sus extremos.
+            // Lines only show their endpoints.
         } else if case .arrow = annotation.kind {
-            // Igual que las lineas.
+            // Same as lines.
         } else {
             let bounds = transform.toView(layout.toOutput(annotation.bounds))
             context.stroke(Path(bounds), with: .color(accent.opacity(0.8)), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
@@ -146,7 +146,7 @@ struct EditorCanvasView: View {
             let viewOrigin = transform.toView(layout.toOutput(origin))
             let padding = style.textBackground ? AnnotationMetrics.textPadding : .zero
 
-            TextField("Escribe aquí", text: $viewModel.textDraft, axis: .vertical)
+            TextField("Type here", text: $viewModel.textDraft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: style.fontSize * transform.scale, weight: .bold))
                 .foregroundStyle(style.textBackground ? Color(nsColor: style.color.contrastingTextColor) : style.color)
@@ -206,7 +206,7 @@ struct EditorCanvasView: View {
     }
 }
 
-/// Escala y desplazamiento del lienzo de salida dentro de la vista.
+/// Scale and offset of the output canvas within the view.
 struct CanvasTransform {
     let scale: CGFloat
     let origin: CGPoint

@@ -110,7 +110,7 @@ struct ActionButtonStyle: ButtonStyle {
 
 // MARK: - Inspector controls
 
-/// Titulo de seccion en mayusculas de los paneles laterales.
+/// Uppercase section title for the side panels.
 struct InspectorTitle: View {
     let text: String
 
@@ -126,7 +126,7 @@ struct InspectorTitle: View {
     }
 }
 
-/// Fila de botones de opcion con el estilo del inspector.
+/// Row of option buttons in the inspector style.
 struct ChipRow<Option: Hashable>: View {
     let options: [Option]
     @Binding var selection: Option
@@ -152,7 +152,7 @@ struct ChipRow<Option: Hashable>: View {
     }
 }
 
-/// Slider con titulo y valor, para los paneles laterales.
+/// Slider with a title and value, for the side panels.
 struct InspectorSlider: View {
     let title: String
     @Binding var value: CGFloat
@@ -177,7 +177,7 @@ struct InspectorSlider: View {
 
 // MARK: - WindowDragArea
 
-/// Zona vacia que permite arrastrar ventanas cuyo contenido SwiftUI cubre la barra de titulo.
+/// Empty area that lets you drag windows whose SwiftUI content covers the title bar.
 struct WindowDragArea: View {
     var body: some View {
         Color.clear

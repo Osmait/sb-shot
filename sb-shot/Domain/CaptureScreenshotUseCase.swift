@@ -11,7 +11,7 @@ struct CaptureScreenshotUseCase {
             return true
         }
 
-        // La primera vez el sistema muestra su propio aviso; los Ajustes solo se abren en intentos posteriores.
+        // The first time the system shows its own prompt; Settings is only opened on later attempts.
         let alreadyRequested = permissions.hasRequestedScreenRecordingAccess()
         guard permissions.requestScreenRecordingAccess() else {
             if alreadyRequested {
@@ -48,7 +48,7 @@ struct CaptureScreenshotUseCase {
             var options = selectionOptions
             options.startInWindowMode = mode == .window
             if case .timed = mode {
-                // La captura se hace despues de la cuenta regresiva, asi que no se congela la pantalla.
+                // The capture happens after the countdown, so the screen is not frozen.
                 options.freezeScreen = false
             }
             options.hidesDesktopIcons = captureOptions.hideDesktopIcons
@@ -77,7 +77,7 @@ struct CaptureScreenshotUseCase {
         }
     }
 
-    /// La imagen congelada esta a resolucion Retina; con `downscaleToOneX` se lleva a un pixel por punto.
+    /// The frozen image is at Retina resolution; with `downscaleToOneX` it is scaled to one pixel per point.
     private static func downscaledToPoints(_ image: NSImage) -> NSImage {
         let width = Int(image.size.width.rounded())
         let height = Int(image.size.height.rounded())

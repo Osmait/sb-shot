@@ -2,8 +2,8 @@ import AppKit
 import AVFoundation
 import UniformTypeIdentifiers
 
-/// Decide que hacer con cada captura o grabacion segun los ajustes, y ejecuta las acciones
-/// del acceso rapido, el editor y el historial.
+/// Decides what to do with each screenshot or recording based on the settings, and runs the
+/// Quick Access, editor and history actions.
 @MainActor
 final class CaptureOutputHandler {
     private let settings: AppSettings
@@ -15,7 +15,7 @@ final class CaptureOutputHandler {
     private let videoEditor: VideoEditorPresenting
     private let pins: PinPresenting
     private let toast: ToastPresenting
-    /// Las capturas se procesan en orden: cada una espera a la anterior antes de elegir nombre y portapapeles.
+    /// Screenshots are processed in order: each one waits for the previous one before picking a name and the clipboard.
     private var screenshotPipeline: Task<Void, Never>?
 
     init(
@@ -54,8 +54,8 @@ final class CaptureOutputHandler {
         }
     }
 
-    /// Codifica la imagen una sola vez (fuera del hilo principal) y reutiliza los bytes para el archivo
-    /// y el portapapeles.
+    /// Encodes the image only once (off the main thread) and reuses the bytes for the file
+    /// and the clipboard.
     private func processScreenshot(_ image: NSImage) async {
         let format = settings.imageFormat
         let data = await files.encodeInBackground(image, as: format)
@@ -73,9 +73,9 @@ final class CaptureOutputHandler {
             }
         }
 
-        // Sin archivo se pierde el acceso rapido, pero no el portapapeles ni el editor.
+        // Without a file, Quick Access is lost, but not the clipboard or the editor.
         guard let fileURL else {
-            toast.show("No se pudo guardar la captura", systemImage: "exclamationmark.triangle")
+            toast.show(String(localized: "Couldn’t save the screenshot"), systemImage: "exclamationmark.triangle")
             if settings.openEditorAfterCapture {
                 openEditor(image)
             }
@@ -95,7 +95,7 @@ final class CaptureOutputHandler {
         } else if settings.showQuickAccess {
             showQuickAccess(state)
         } else {
-            toast.show(settings.copyToClipboard ? "Captura copiada" : "Captura lista", systemImage: "checkmark.circle.fill")
+            toast.show(settings.copyToClipboard ? String(localized: "Screenshot copied") : String(localized: "Screenshot ready"), systemImage: "checkmark.circle.fill")
         }
     }
 
@@ -107,19 +107,19 @@ final class CaptureOutputHandler {
         var item = CaptureItem(content: .video(sourceURL), thumbnail: thumbnail, fileURL: sourceURL)
         var gifFailed = false
         if settings.recordingFormat == .gif {
-            toast.showProgress("Creando GIF…")
+            toast.showProgress(String(localized: "Creating GIF…"))
             if let gifURL = await makeGIF(from: sourceURL) {
                 toast.hide()
                 try? FileManager.default.removeItem(at: sourceURL)
                 item = CaptureItem(content: .gif(gifURL), thumbnail: thumbnail, fileURL: gifURL)
             } else {
-                // Se conserva la grabacion como video para no perderla.
+                // Keep the recording as a video so it isn't lost.
                 gifFailed = true
-                toast.show("No se pudo crear el GIF; se conserva el video", systemImage: "exclamationmark.triangle")
+                toast.show(String(localized: "Couldn’t create the GIF; the video was kept"), systemImage: "exclamationmark.triangle")
             }
         }
 
-        // El historial copia desde el temporal: la carpeta personalizada no es accesible sin su bookmark.
+        // History copies from the temporary file: the custom folder isn't accessible without its bookmark.
         let state = QuickAccessState(item: item)
         if settings.autoSave {
             state.savedURL = saveToFolder(item.fileURL, announce: false)
@@ -131,33 +131,33 @@ final class CaptureOutputHandler {
         if settings.showQuickAccess {
             showQuickAccess(state)
         } else if !gifFailed {
-            toast.show(settings.autoSave ? "Grabación guardada" : "Grabación lista", systemImage: "checkmark.circle.fill")
+            toast.show(settings.autoSave ? String(localized: "Recording saved") : String(localized: "Recording ready"), systemImage: "checkmark.circle.fill")
         }
     }
 
     func handleRecognizedText(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            toast.show("No se encontró texto", systemImage: "text.magnifyingglass")
+            toast.show(String(localized: "No text found"), systemImage: "text.magnifyingglass")
             return
         }
         clipboard.copy(text: trimmed)
         let lines = trimmed.components(separatedBy: .newlines).count
-        toast.show(lines == 1 ? "Texto copiado" : "Texto copiado (\(lines) líneas)", systemImage: "text.viewfinder")
+        toast.show(lines == 1 ? String(localized: "Text copied") : String(localized: "Text copied (\(lines) lines)"), systemImage: "text.viewfinder")
     }
 
     // MARK: - Item actions
 
     func copy(_ item: CaptureItem) {
         if let image = item.image {
-            // Reutiliza los bytes del archivo en lugar de volver a codificar la imagen.
+            // Reuse the file bytes instead of re-encoding the image.
             if !clipboard.copyImageFile(at: item.fileURL) {
                 clipboard.copy(image: image)
             }
         } else {
             clipboard.copy(fileURL: item.fileURL)
         }
-        toast.show("Copiado", systemImage: "doc.on.clipboard.fill")
+        toast.show(String(localized: "Copied"), systemImage: "doc.on.clipboard.fill")
     }
 
     func edit(_ item: CaptureItem) {
@@ -175,7 +175,7 @@ final class CaptureOutputHandler {
         editor.show(image: image, actions: EditorActions(
             onCopy: { [weak self] image in
                 self?.clipboard.copy(image: image)
-                self?.toast.show("Copiado", systemImage: "doc.on.clipboard.fill")
+                self?.toast.show(String(localized: "Copied"), systemImage: "doc.on.clipboard.fill")
             },
             onSave: { [weak self] image in
                 guard let self, let url = writeTemporary(image) else { return }
@@ -185,10 +185,10 @@ final class CaptureOutputHandler {
                 guard let self, let url = writeTemporary(image) else { return }
                 do {
                     if try files.saveWithPanel(url) != nil {
-                        toast.show("Guardado", systemImage: "checkmark.circle.fill")
+                        toast.show(String(localized: "Saved"), systemImage: "checkmark.circle.fill")
                     }
                 } catch {
-                    toast.show("No se pudo guardar el archivo", systemImage: "exclamationmark.triangle")
+                    toast.show(String(localized: "Couldn’t save the file"), systemImage: "exclamationmark.triangle")
                 }
             },
             onPin: { [weak self] image in
@@ -201,7 +201,7 @@ final class CaptureOutputHandler {
         videoEditor.show(videoURL: url, actions: VideoEditorActions(
             onCopy: { [weak self] url in
                 self?.clipboard.copy(fileURL: url)
-                self?.toast.show("Copiado", systemImage: "doc.on.clipboard.fill")
+                self?.toast.show(String(localized: "Copied"), systemImage: "doc.on.clipboard.fill")
             },
             onSave: { [weak self] url in
                 guard let self, saveToFolder(url, announce: true) != nil, settings.keepHistory else { return }
@@ -218,7 +218,7 @@ final class CaptureOutputHandler {
             onEdit: { [weak self] image in self?.openEditor(image) },
             onCopy: { [weak self] image in
                 self?.clipboard.copy(image: image)
-                self?.toast.show("Copiado", systemImage: "doc.on.clipboard.fill")
+                self?.toast.show(String(localized: "Copied"), systemImage: "doc.on.clipboard.fill")
             }
         )
     }
@@ -230,9 +230,9 @@ final class CaptureOutputHandler {
                 openEditor(image)
             }
         case .video:
-            // El editor trabaja sobre una copia: borrar o recortar el historial no le quita el archivo.
+            // The editor works on a copy: deleting or trimming the history doesn't take the file away from it.
             guard let copy = try? files.temporaryCopy(of: url, prefix: settings.fileNamePrefix, date: entry.createdAt) else {
-                toast.show("No se pudo abrir la grabación", systemImage: "exclamationmark.triangle")
+                toast.show(String(localized: "Couldn’t open the recording"), systemImage: "exclamationmark.triangle")
                 return
             }
             openVideoEditor(copy)
@@ -244,13 +244,13 @@ final class CaptureOutputHandler {
     func copyHistoryEntry(_ entry: HistoryEntry, url: URL) {
         if entry.kind == .image {
             guard clipboard.copyImageFile(at: url) else {
-                toast.show("No se pudo copiar", systemImage: "exclamationmark.triangle")
+                toast.show(String(localized: "Couldn’t copy"), systemImage: "exclamationmark.triangle")
                 return
             }
         } else {
             clipboard.copy(fileURL: url)
         }
-        toast.show("Copiado", systemImage: "doc.on.clipboard.fill")
+        toast.show(String(localized: "Copied"), systemImage: "doc.on.clipboard.fill")
     }
 
     func reveal(_ url: URL) {
@@ -270,10 +270,10 @@ final class CaptureOutputHandler {
         ))
     }
 
-    /// Guarda una sola vez por carpeta: pulsar Guardar de nuevo no crea duplicados.
+    /// Saves only once per folder: pressing Save again doesn't create duplicates.
     private func save(_ state: QuickAccessState) {
         if let saved = state.savedURL, files.isInSaveFolder(saved) {
-            toast.show("Ya está en \(files.saveFolderDisplayPath)", systemImage: "folder")
+            toast.show(String(localized: "Already in \(files.saveFolderDisplayPath)"), systemImage: "folder")
             return
         }
         if let saved = saveToFolder(state.item.fileURL, announce: true) {
@@ -300,18 +300,18 @@ final class CaptureOutputHandler {
         do {
             let saved = try files.saveToFolder(url)
             if announce {
-                toast.show("Guardado en \(files.saveFolderDisplayPath)", systemImage: "checkmark.circle.fill")
+                toast.show(String(localized: "Saved to \(files.saveFolderDisplayPath)"), systemImage: "checkmark.circle.fill")
             }
             return saved
         } catch {
-            toast.show("No se pudo guardar en \(files.saveFolderDisplayPath)", systemImage: "exclamationmark.triangle")
+            toast.show(String(localized: "Couldn’t save to \(files.saveFolderDisplayPath)"), systemImage: "exclamationmark.triangle")
             return nil
         }
     }
 }
 
-/// Estado compartido por las acciones de una tarjeta de acceso rapido. `item.fileURL` es siempre el
-/// temporal (legible sin bookmark); `savedURL` es la copia en la carpeta de guardado, si existe.
+/// State shared by the actions of a Quick Access card. `item.fileURL` is always the
+/// temporary file (readable without a bookmark); `savedURL` is the copy in the save folder, if any.
 private final class QuickAccessState {
     let item: CaptureItem
     var savedURL: URL?

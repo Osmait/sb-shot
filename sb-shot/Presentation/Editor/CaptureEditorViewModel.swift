@@ -68,9 +68,9 @@ final class CaptureEditorViewModel: ObservableObject {
     private var interaction: Interaction?
     private var isSyncingStyle = false
     private var lastCoalescedChange: (key: String, date: Date)?
-    /// Texto recien creado y la pila de rehacer que habia antes, para deshacer su creacion si queda vacio.
+    /// Newly created text and the redo stack it replaced, to undo its creation if it ends up empty.
     private var newTextUndo: (id: UUID, snapshot: EditorDocument, redo: [EditorDocument])?
-    /// Ultimo render completo, para reutilizarlo si el documento no cambio (arrastrar, copiar otra vez...).
+    /// Last full render, reused while the document is unchanged (dragging, copying again...).
     private var renderCache: (document: EditorDocument, image: NSImage)?
     private var preparedObfuscations: Set<ObfuscationMode> = []
     private var toolBeforeCrop: EditorTool = .arrow
@@ -104,7 +104,7 @@ final class CaptureEditorViewModel: ObservableObject {
         RenderLayout(document: document, imageSize: baseImage.size, applyCropAndBackground: !isCropping)
     }
 
-    /// Documento con la forma que se esta dibujando, para el lienzo.
+    /// Document including the shape being drawn, for the canvas.
     var displayDocument: EditorDocument {
         var display = document
         if let draft {
@@ -123,7 +123,7 @@ final class CaptureEditorViewModel: ObservableObject {
         return document.annotations.first { $0.id == editingTextID }
     }
 
-    /// Herramienta cuyos controles de estilo se muestran: la de la anotacion seleccionada o la activa.
+    /// Tool whose style controls are shown: the selected annotation's tool or the active one.
     var styleTool: EditorTool {
         guard let selectedAnnotation else { return activeTool }
         return Self.tool(for: selectedAnnotation.kind)
@@ -291,7 +291,7 @@ final class CaptureEditorViewModel: ObservableObject {
     }
 
     func undo() {
-        // Si se descarta un texto nuevo vacio, eso ya deshace su creacion.
+        // Discarding an empty new text already undoes its creation.
         if finishTextEditing() {
             return
         }
@@ -311,7 +311,7 @@ final class CaptureEditorViewModel: ObservableObject {
         validateSelection()
     }
 
-    /// Render sincrono, para arrastrar y soltar (que necesita el archivo en el momento). Reutiliza el ultimo render.
+    /// Synchronous render for drag and drop (which needs the file immediately). Reuses the last render.
     func renderedImage() -> NSImage {
         commitTextEditing()
         if let renderCache, renderCache.document == document {
@@ -323,7 +323,7 @@ final class CaptureEditorViewModel: ObservableObject {
         return image
     }
 
-    /// Render a resolucion completa fuera del hilo principal.
+    /// Full-resolution render off the main thread.
     func renderImage() async -> NSImage {
         commitTextEditing()
         if let renderCache, renderCache.document == document {
@@ -351,8 +351,8 @@ final class CaptureEditorViewModel: ObservableObject {
         finishTextEditing()
     }
 
-    /// Termina la edicion de texto. Devuelve `true` si se descarto un texto recien creado y vacio,
-    /// en cuyo caso tambien se quita su paso de deshacer y se recupera la pila de rehacer.
+    /// Ends text editing. Returns `true` if a newly created empty text was discarded,
+    /// in which case its undo step is also removed and the redo stack is restored.
     @discardableResult
     private func finishTextEditing() -> Bool {
         guard let id = editingTextID else { return false }
@@ -368,7 +368,7 @@ final class CaptureEditorViewModel: ObservableObject {
             selectedID = nil
         }
 
-        // Solo si no hubo otros cambios desde la creacion (por ejemplo, el tamano de letra mientras se escribe).
+        // Only if nothing else changed since creation (for example, the font size while typing).
         guard let newText, newText.id == id, undoStack.last == newText.snapshot, document == newText.snapshot else { return false }
         undoStack.removeLast()
         redoStack = newText.redo
@@ -509,7 +509,7 @@ final class CaptureEditorViewModel: ObservableObject {
         isSyncingStyle = false
     }
 
-    /// `coalesceKey` agrupa los cambios continuos (slider, selector de color); `nil` crea siempre un paso nuevo.
+    /// `coalesceKey` groups continuous changes (slider, color picker); `nil` always creates a new step.
     private func applyStyleToSelection(coalesceKey: String? = nil, _ change: (inout AnnotationStyle) -> Void) {
         guard !isSyncingStyle, let selectedID, let index = document.annotations.firstIndex(where: { $0.id == selectedID }) else { return }
 
@@ -524,9 +524,9 @@ final class CaptureEditorViewModel: ObservableObject {
         }
     }
 
-    /// Agrupa cambios seguidos con la misma clave (por ejemplo, mover un slider) en un solo paso de deshacer.
-    /// El primero guarda el estado previo; los siguientes, dentro de un segundo del anterior, solo modifican el documento.
-    /// Cualquier otro cambio con paso propio (`pushUndo`), deshacer o rehacer corta el grupo.
+    /// Groups consecutive changes with the same key (for example, moving a slider) into a single undo step.
+    /// The first one saves the previous state; the following ones, within a second of the last, only modify the document.
+    /// Any other change with its own step (`pushUndo`), undo, or redo ends the group.
     private func coalescingMutate(key: String, _ change: (inout EditorDocument) -> Void) {
         if let last = lastCoalescedChange, last.key == key, Date().timeIntervalSince(last.date) < 1.0, !undoStack.isEmpty {
             change(&document)
@@ -536,7 +536,7 @@ final class CaptureEditorViewModel: ObservableObject {
         lastCoalescedChange = (key, Date())
     }
 
-    /// Calcula en segundo plano la variante pixelada o desenfocada antes de que haga falta dibujarla.
+    /// Computes the pixelated or blurred variant in the background before it needs to be drawn.
     private func prepareObfuscation(_ mode: ObfuscationMode) {
         guard preparedObfuscations.insert(mode).inserted else { return }
         let sources = [previewSources, exportSources].compactMap { $0 }
@@ -646,3 +646,18 @@ final class CaptureEditorViewModel: ObservableObject {
         }
     }
 }
+
+#if DEBUG
+extension CaptureEditorViewModel {
+    /// Demo mode: replaces the document (without an undo step) and selects an annotation.
+    func loadDemoDocument(_ demo: EditorDocument, selecting id: UUID?) {
+        activeTool = .select
+        document = demo
+        prepareObfuscation(.pixelate)
+        prepareObfuscation(.blur)
+        if let annotation = demo.annotations.first(where: { $0.id == id }) {
+            select(annotation)
+        }
+    }
+}
+#endif

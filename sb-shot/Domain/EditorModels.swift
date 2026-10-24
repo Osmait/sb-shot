@@ -37,22 +37,22 @@ enum EditorTool: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .select: "Seleccionar"
-        case .arrow: "Flecha"
-        case .line: "Línea"
-        case .rectangle: "Rectángulo"
-        case .ellipse: "Elipse"
-        case .text: "Texto"
-        case .counter: "Contador"
-        case .pencil: "Lápiz"
-        case .highlighter: "Resaltador"
-        case .obfuscate: "Pixelar / desenfocar"
-        case .spotlight: "Foco"
-        case .crop: "Recortar"
+        case .select: String(localized: "Select")
+        case .arrow: String(localized: "Arrow")
+        case .line: String(localized: "Line")
+        case .rectangle: String(localized: "Rectangle")
+        case .ellipse: String(localized: "Ellipse")
+        case .text: String(localized: "Text")
+        case .counter: String(localized: "Counter")
+        case .pencil: String(localized: "Pencil")
+        case .highlighter: String(localized: "Highlighter")
+        case .obfuscate: String(localized: "Pixelate / Blur")
+        case .spotlight: String(localized: "Spotlight")
+        case .crop: String(localized: "Crop")
         }
     }
 
-    /// Tecla que activa la herramienta en el editor.
+    /// Key that activates the tool in the editor.
     var shortcutKey: Character {
         switch self {
         case .select: "v"
@@ -95,8 +95,8 @@ nonisolated enum ObfuscationMode: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .pixelate: "Pixelar"
-        case .blur: "Desenfocar"
+        case .pixelate: String(localized: "Pixelate")
+        case .blur: String(localized: "Blur")
         }
     }
 }
@@ -172,14 +172,14 @@ nonisolated enum BackgroundAspect: String, CaseIterable, Identifiable, Sendable 
 
     var title: String {
         switch self {
-        case .auto: "Auto"
+        case .auto: String(localized: "Auto")
         case .wide: "16:9"
         case .standard: "4:3"
         case .square: "1:1"
         }
     }
 
-    /// Ancho / alto, o `nil` para ajustarse al contenido.
+    /// Width / height, or `nil` to fit the content.
     var ratio: CGFloat? {
         switch self {
         case .auto: nil
@@ -197,9 +197,9 @@ nonisolated struct BackgroundSettings: Equatable, Sendable {
     var cornerRadius: CGFloat = 12
     var shadow = true
     var aspect: BackgroundAspect = .auto
-    /// Fondo de pantalla del usuario. Si existe, reemplaza al degradado.
+    /// The user's wallpaper. When set, it replaces the gradient.
     var wallpaper: CGImage?
-    /// Desenfoque del fondo de pantalla, en pixeles de una imagen de referencia de 1600 px.
+    /// Wallpaper blur, in pixels of a 1600 px reference image.
     var wallpaperBlur: CGFloat = 0
 
     var preset: BackgroundPreset {
@@ -211,7 +211,7 @@ nonisolated struct BackgroundSettings: Equatable, Sendable {
 
 nonisolated struct EditorDocument: Equatable, Sendable {
     var annotations: [EditorAnnotation] = []
-    /// Recorte en coordenadas de la imagen. `nil` usa la imagen completa.
+    /// Crop in image coordinates. `nil` uses the whole image.
     var cropRect: CGRect?
     var background = BackgroundSettings()
 }

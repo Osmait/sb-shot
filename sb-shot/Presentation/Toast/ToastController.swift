@@ -1,14 +1,14 @@
 import AppKit
 import SwiftUI
 
-/// Aviso flotante breve en la parte inferior de la pantalla ("Copiado", "Guardado"...).
+/// Short floating notice at the bottom of the screen ("Copied", "Saved"...).
 final class ToastController: ToastPresenting {
     private var panel: NSPanel?
     private var hideTask: Task<Void, Never>?
-    /// Cambia con cada aviso nuevo, para que el final de un fundido anterior no oculte el actual.
+    /// Changes with every new notice, so the end of a previous fade-out doesn't hide the current one.
     private var generation = 0
 
-    /// Hay un aviso en pantalla (o desvaneciendose). Visible para las pruebas.
+    /// A notice is on screen (or fading out). Visible for tests.
     var hasPanel: Bool {
         panel != nil
     }
@@ -61,7 +61,7 @@ final class ToastController: ToastPresenting {
             }
         } else {
             panel.orderFrontRegardless()
-            // Reemplaza un posible fundido de salida en curso.
+            // Replaces a fade-out that may be in progress.
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.1
                 panel.animator().alphaValue = 1

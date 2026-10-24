@@ -1,17 +1,17 @@
 import AppKit
 import Carbon
 
-/// Registra los atajos globales de cada accion con Carbon.
+/// Registers the global shortcut of each action with Carbon.
 final class HotkeyManager {
     var onHotKeyPressed: ((CaptureAction) -> Void)?
 
     private var eventHandler: EventHandlerRef?
     private var hotKeyRefs: [EventHotKeyRef] = []
-    /// Atajos pedidos en la ultima llamada a `register`, para no repetir el registro.
+    /// Shortcuts requested in the last call to `register`, to avoid registering them again.
     private var requested: [CaptureAction: GlobalShortcut] = [:]
-    /// Solo los atajos que el sistema acepto.
+    /// Only the shortcuts the system accepted.
     private(set) var registered: [CaptureAction: GlobalShortcut] = [:]
-    /// Acciones cuyo atajo no se pudo registrar (normalmente porque otra app ya lo usa).
+    /// Actions whose shortcut could not be registered (usually because another app already uses it).
     private(set) var failedActions: Set<CaptureAction> = []
 
     init() {

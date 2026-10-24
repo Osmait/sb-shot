@@ -58,7 +58,7 @@ private final class Harness {
     let toast = FakeToast()
     let handler: CaptureOutputHandler
 
-    /// `brokenTemp` hace imposible escribir en la carpeta temporal (su ruta cuelga de un archivo normal).
+    /// `brokenTemp` makes writing to the temporary folder impossible (its path hangs off a regular file).
     init(customSaveFolder: Bool, brokenTemp: Bool = false) throws {
         let fm = FileManager.default
         root = fm.temporaryDirectory.appendingPathComponent("sbshot-tests-output-\(UUID().uuidString)", isDirectory: true)
@@ -105,7 +105,7 @@ private final class Harness {
 
     func fakeRecording() throws -> URL {
         let url = root.appendingPathComponent("raw-\(UUID().uuidString).mp4")
-        try Data("no-es-un-video-real".utf8).write(to: url)
+        try Data("not-a-real-video".utf8).write(to: url)
         return url
     }
 
@@ -159,7 +159,7 @@ struct CaptureOutputHandlerFixesTests {
         #expect(item.fileURL.pathExtension == "mp4")
         #expect(FileManager.default.fileExists(atPath: item.fileURL.path))
         #expect(h.history.entries.first?.kind == .video)
-        #expect(h.toast.messages.contains { $0.contains("se conserva el video") })
+        #expect(h.toast.messages.contains { $0.contains(String(localized: "Couldn’t create the GIF; the video was kept")) })
     }
 
     @Test func pressingSaveTwiceDoesNotCreateDuplicate() async throws {
@@ -174,7 +174,7 @@ struct CaptureOutputHandlerFixesTests {
         #expect(h.savedFiles().count == 1)
         actions.onSave()
         #expect(h.savedFiles().count == 1)
-        #expect(h.toast.messages.contains { $0.hasPrefix("Ya está en") })
+        #expect(h.toast.messages.contains { $0.hasPrefix("Already in") })
     }
 
     @Test func screenshotWriteFailureStillCopiesToClipboard() async throws {
@@ -182,7 +182,7 @@ struct CaptureOutputHandlerFixesTests {
         defer { h.cleanUp() }
 
         h.handler.handleScreenshot(Harness.makeImage())
-        #expect(await waitUntil { h.toast.messages.contains("No se pudo guardar la captura") })
+        #expect(await waitUntil { h.toast.messages.contains(String(localized: "Couldn’t save the screenshot")) })
 
         #expect(h.clipboard.pngCopies.count == 1)
         #expect(h.clipboard.pngCopies.first?.fileURL == nil)

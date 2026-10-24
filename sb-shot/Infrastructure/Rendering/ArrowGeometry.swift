@@ -4,7 +4,7 @@ nonisolated struct ArrowHead {
     let tip: CGPoint
     let left: CGPoint
     let right: CGPoint
-    /// Punto donde termina el cuerpo de la flecha (base de la punta).
+    /// Point where the arrow's shaft ends (base of the head).
     let base: CGPoint
 
     init(from start: CGPoint, to end: CGPoint, lineWidth: CGFloat) {

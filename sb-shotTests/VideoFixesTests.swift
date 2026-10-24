@@ -25,7 +25,7 @@ struct WallpaperBlurTests {
     }
 
     @Test func zeroRadiusCoveringSmallerOrEqualCanvasReturnsSameImage() {
-        // Lienzo igual o mayor que la imagen: no hace falta reducirla.
+        // Canvas equal to or larger than the image: no need to downscale it.
         let image = makeImage(width: 200, height: 100)
         let result = WallpaperBlur.image(image, radius: 0, covering: CGSize(width: 200, height: 100))
         #expect(result === image)
@@ -55,7 +55,7 @@ struct WallpaperBlurTests {
     }
 
     @Test func coveringDownsizesToRoughlyRequestedSize() {
-        // 2000x1000 cubriendo 400x200 px: se necesitan ~2000*0.2... = 400 px de lado mayor, redondeado a 256 => 512.
+        // 2000x1000 covering 400x200 px: ~2000*0.2... = 400 px on the longer side are needed, rounded to 256 => 512.
         let image = makeImage(width: 2000, height: 1000)
         let size = CGSize(width: 400, height: 200)
 
@@ -64,14 +64,14 @@ struct WallpaperBlurTests {
             #expect(result.width < image.width)
             #expect(result.width >= 400)
             #expect(result.width <= 400 + 256)
-            // Conserva la proporcion.
+            // Preserves the aspect ratio.
             let ratio = Double(result.width) / Double(result.height)
             #expect(abs(ratio - 2.0) < 0.05)
         }
     }
 
     @Test func coveringTallCanvasUsesLargerDimension() {
-        // Imagen 2000x1000 en lienzo 300x600: cubrir exige escala 0.6 => lado mayor 1200 => 1280.
+        // 2000x1000 image on a 300x600 canvas: covering requires scale 0.6 => longer side 1200 => 1280.
         let image = makeImage(width: 2000, height: 1000)
         let result = WallpaperBlur.image(image, radius: 0, covering: CGSize(width: 300, height: 600))
         #expect(result.width >= 1200)
@@ -94,15 +94,15 @@ struct GifSamplingTests {
 
         let all = times(duration: 400, fps: 15)
         let last = all.last ?? 0
-        #expect(last > 395) // antes se quedaba en ~300 s
+        #expect(last > 395) // used to stall at ~300 s
         #expect(last < 400)
         #expect(all.first == 0)
-        // Paso uniforme.
+        // Uniform step.
         #expect(abs(sampling.step - 400.0 / 600.0) < 1e-9)
     }
 
     @Test func clipJustOverCapStillCoversRange() {
-        // 41 s a 15 fps = 615 cuadros pedidos > 600.
+        // 41 s at 15 fps = 615 frames requested > 600.
         let sampling = GifExporter.frameSampling(duration: 41, framesPerSecond: 15)
         #expect(sampling.isLong)
         #expect(sampling.frameCount == 600)
@@ -196,7 +196,7 @@ struct VideoTrimTests {
         )
         defer { model.tearDown() }
 
-        // Justo tras crear el modelo la duracion aun es 0 (se carga de forma asincrona).
+        // Right after creating the model the duration is still 0 (it loads asynchronously).
         guard model.duration == 0 else { return }
         model.setTrimStart(0.5)
         model.setTrimEnd(0.9)
@@ -212,25 +212,25 @@ struct VideoTrimTests {
         #expect(model.trimStart == 0)
         #expect(model.trimEnd == duration)
 
-        // Inicio negativo: se fija en 0.
+        // Negative start: clamped to 0.
         model.setTrimStart(-5)
         #expect(model.trimStart == 0)
 
-        // Inicio pasado del final: queda a `minimumLength` del final.
+        // Start past the end: stays `minimumLength` before the end.
         model.setTrimStart(duration + 10)
         #expect(abs(model.trimStart - (duration - VideoEditorModel.minimumLength)) < 1e-9)
         #expect(model.trimStart < model.trimEnd)
 
-        // Fin pasado de la duracion: se limita a la duracion.
+        // End past the duration: clamped to the duration.
         model.setTrimEnd(duration + 10)
         #expect(model.trimEnd == duration)
 
-        // Fin antes del inicio: queda a `minimumLength` del inicio.
+        // End before the start: stays `minimumLength` after the start.
         model.setTrimEnd(0)
         #expect(abs(model.trimEnd - (model.trimStart + VideoEditorModel.minimumLength)) < 1e-9)
         #expect(model.trimStart < model.trimEnd)
 
-        // Valores normales.
+        // Normal values.
         model.resetTrim()
         model.setTrimStart(0.5)
         model.setTrimEnd(1.5)

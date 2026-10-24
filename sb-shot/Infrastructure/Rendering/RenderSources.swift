@@ -1,12 +1,12 @@
 import AppKit
 import CoreImage
 
-/// Imagen base y sus variantes (pixelada, desenfocada) que usa el renderer. Las variantes se calculan una sola vez.
-/// Se puede usar desde cualquier hilo: cada variante tiene su propio lock, asi un calculo en segundo plano
-/// (`prepare`) y un dibujado que la necesite comparten el mismo resultado.
+/// Base image and its variants (pixelated, blurred) used by the renderer. Variants are computed only once.
+/// Safe to use from any thread: each variant has its own lock, so a background computation
+/// (`prepare`) and a draw that needs it share the same result.
 nonisolated final class RenderSources: @unchecked Sendable {
     let base: CGImage
-    /// Tamano en puntos de la imagen original. Las anotaciones se guardan en este espacio.
+    /// Size of the original image in points. Annotations are stored in this space.
     let pointSize: CGSize
 
     private let pixelatedLock = NSLock()
@@ -67,7 +67,7 @@ nonisolated final class RenderSources: @unchecked Sendable {
         }
     }
 
-    /// Calcula la variante de antemano, para no hacerlo al dibujar o exportar. Pensado para un hilo de fondo.
+    /// Computes the variant ahead of time so it isn't done while drawing or exporting. Meant for a background thread.
     func prepare(_ mode: ObfuscationMode) {
         _ = image(for: mode)
     }

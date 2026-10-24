@@ -1,25 +1,25 @@
 import AVFoundation
 import CoreImage
 
-/// Fondo para videos: el video queda centrado sobre un degradado o una imagen, con margen, esquinas redondeadas y sombra.
+/// Video background: the video is centered over a gradient or an image, with padding, rounded corners and a shadow.
 nonisolated struct VideoBackgroundStyle: Sendable {
     var startColor: CGColor
     var endColor: CGColor
-    /// Imagen de fondo (el fondo de pantalla). Si existe, reemplaza al degradado.
+    /// Background image (the desktop wallpaper). When set, it replaces the gradient.
     var image: CGImage?
-    /// Margen y radio en puntos de un video de referencia de 1600 px; se escalan con el tamano real.
+    /// Padding and radius in points for a 1600 px reference video; they scale with the actual size.
     var padding: CGFloat
     var cornerRadius: CGFloat
     var shadow: Bool
-    /// Ancho / alto del lienzo, o `nil` para ajustarse al video.
+    /// Canvas width / height, or `nil` to fit the video.
     var aspectRatio: CGFloat?
 }
 
 nonisolated enum VideoBackgroundCompositor {
     struct Layout {
-        /// Tamano del lienzo final en pixeles (par, para H.264).
+        /// Final canvas size in pixels (even, for H.264).
         let renderSize: CGSize
-        /// Donde se dibuja el video, en coordenadas de Core Image (origen abajo-izquierda).
+        /// Where the video is drawn, in Core Image coordinates (bottom-left origin).
         let contentRect: CGRect
         let unit: CGFloat
     }
@@ -43,7 +43,7 @@ nonisolated enum VideoBackgroundCompositor {
         return Layout(renderSize: size, contentRect: CGRect(origin: origin, size: content), unit: unit)
     }
 
-    /// Composicion que aplica el fondo a cada fotograma. Sirve para la reproduccion, la exportacion MP4 y el GIF.
+    /// Composition that applies the background to every frame. Used for playback, MP4 export and GIF.
     static func makeComposition(
         for asset: AVAsset,
         style: VideoBackgroundStyle,
@@ -77,8 +77,8 @@ nonisolated enum VideoBackgroundCompositor {
 
     // MARK: - Private
 
-    /// El fondo no cambia entre fotogramas: se rasteriza una vez (degradado o imagen + sombra desenfocada)
-    /// para no reevaluar la receta de Core Image en cada fotograma de la reproduccion y la exportacion.
+    /// The background doesn't change between frames: rasterize it once (gradient or image + blurred shadow)
+    /// to avoid re-evaluating the Core Image recipe on every frame during playback and export.
     private static func renderedBackground(layout: Layout, style: VideoBackgroundStyle) -> CIImage {
         let recipe = backgroundImage(layout: layout, style: style)
         let extent = CGRect(origin: .zero, size: layout.renderSize)

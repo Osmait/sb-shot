@@ -1,7 +1,7 @@
 import AVFoundation
 import ScreenCaptureKit
 
-/// Graba un area, una pantalla o una ventana a MP4 con ScreenCaptureKit (`SCRecordingOutput`).
+/// Records an area, a display or a window to MP4 with ScreenCaptureKit (`SCRecordingOutput`).
 final class ScreenRecordingService: NSObject {
     enum RecordingError: LocalizedError {
         case alreadyRecording
@@ -12,16 +12,16 @@ final class ScreenRecordingService: NSObject {
 
         var errorDescription: String? {
             switch self {
-            case .alreadyRecording: "Ya hay una grabación en curso"
-            case .notRecording: "No hay ninguna grabación activa"
-            case .targetNotFound: "No se encontró la pantalla o ventana a grabar"
-            case .emptyArea: "El área seleccionada es demasiado pequeña"
-            case let .failed(error): error?.localizedDescription ?? "La grabación falló"
+            case .alreadyRecording: String(localized: "A recording is already in progress")
+            case .notRecording: String(localized: "There is no active recording")
+            case .targetNotFound: String(localized: "The display or window to record could not be found")
+            case .emptyArea: String(localized: "The selected area is too small")
+            case let .failed(error): error?.localizedDescription ?? String(localized: "The recording failed")
             }
         }
     }
 
-    /// Se llama si la grabacion se detiene sola (por ejemplo, si se cierra la ventana grabada).
+    /// Called if the recording stops on its own (for example, when the recorded window is closed).
     var onUnexpectedStop: ((Error?) -> Void)?
 
     private var stream: SCStream?
@@ -29,9 +29,9 @@ final class ScreenRecordingService: NSObject {
     private var outputURL: URL?
     private var finishContinuation: CheckedContinuation<Void, Error>?
     private var isStopping = false
-    /// Resultado del archivo si el delegado lo reporta antes de que alguien espere en `stop()`.
+    /// File result, if the delegate reports it before anyone awaits `stop()`.
     private var finishResult: Result<Void, Error>?
-    /// El stream ya se detuvo solo; `stopCapture()` fallaria.
+    /// The stream already stopped on its own; `stopCapture()` would fail.
     private var streamDidStop = false
     private var didReportUnexpectedStop = false
     private var stopFallbackTask: Task<Void, Never>?
@@ -67,7 +67,7 @@ final class ScreenRecordingService: NSObject {
 
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("sb-shot", isDirectory: true)
-            .appendingPathComponent("grabacion-\(UUID().uuidString).mp4")
+            .appendingPathComponent("recording-\(UUID().uuidString).mp4")
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
 
         let outputConfig = SCRecordingOutputConfiguration()
@@ -78,7 +78,7 @@ final class ScreenRecordingService: NSObject {
         let output = SCRecordingOutput(configuration: outputConfig, delegate: self)
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
 
-        // ScreenCaptureKit avisa si no hay una salida por tipo de muestra, aunque solo se use SCRecordingOutput.
+        // ScreenCaptureKit warns if there is no output per sample type, even when only SCRecordingOutput is used.
         try stream.addStreamOutput(sink, type: .screen, sampleHandlerQueue: sink.queue)
         if options.capturesSystemAudio {
             try stream.addStreamOutput(sink, type: .audio, sampleHandlerQueue: sink.queue)
@@ -107,12 +107,12 @@ final class ScreenRecordingService: NSObject {
     func stop() async throws -> URL {
         guard let stream, let url = outputURL else { throw RecordingError.notRecording }
         isStopping = true
-        // Siempre se libera la sesion, incluso si falla, para que la siguiente grabacion pueda empezar.
+        // Always release the session, even on failure, so the next recording can start.
         defer { reset() }
 
         do {
             if let finishResult {
-                // El archivo ya se cerro (por ejemplo, se cerro la ventana grabada).
+                // The file is already closed (for example, the recorded window was closed).
                 try finishResult.get()
             } else {
                 let alreadyStopped = streamDidStop
@@ -122,7 +122,7 @@ final class ScreenRecordingService: NSObject {
                         if !alreadyStopped {
                             try? await stream.stopCapture()
                         }
-                        // Si el delegado no confirma el cierre del archivo, se continua tras una espera prudente.
+                        // If the delegate never confirms the file was closed, continue after a reasonable wait.
                         try? await Task.sleep(nanoseconds: alreadyStopped ? 3_000_000_000 : 10_000_000_000)
                         guard !Task.isCancelled else { return }
                         self?.resumeFinish(with: nil)
@@ -156,7 +156,7 @@ final class ScreenRecordingService: NSObject {
 
     // MARK: - Private
 
-    /// Las ventanas recien creadas tardan un momento en aparecer en `SCShareableContent`.
+    /// Newly created windows take a moment to show up in `SCShareableContent`.
     private func shareableContent(waitingFor windowNumbers: [Int]) async throws -> SCShareableContent {
         var content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         for _ in 0 ..< 10 {
@@ -172,7 +172,7 @@ final class ScreenRecordingService: NSObject {
 
     private struct CaptureTarget {
         let filter: SCContentFilter
-        /// Region de la pantalla a grabar (coordenadas locales de la pantalla), o `nil` para todo el contenido.
+        /// Display region to record (in display-local coordinates), or `nil` for all content.
         let sourceRect: CGRect?
         let pointSize: CGSize
     }
@@ -219,8 +219,8 @@ final class ScreenRecordingService: NSObject {
         }
     }
 
-    /// Excluye la app completa (barra de control, borde, avisos que aparezcan despues) en lugar de ventanas
-    /// sueltas, porque las ventanas recien creadas pueden no figurar todavia en `SCShareableContent`.
+    /// Excludes the whole app (control bar, border, toasts shown later) instead of individual windows,
+    /// because newly created windows may not be listed in `SCShareableContent` yet.
     private func displayFilter(_ display: SCDisplay, content: SCShareableContent, visibleOwnWindowNumbers: [Int]) -> SCContentFilter {
         let pid = ProcessInfo.processInfo.processIdentifier
         let visible = content.windows.filter { visibleOwnWindowNumbers.contains(Int($0.windowID)) }
@@ -235,7 +235,7 @@ final class ScreenRecordingService: NSObject {
         return SCContentFilter(display: display, excludingWindows: ownWindows)
     }
 
-    /// H.264 exige dimensiones pares y tiene un limite practico de 4K.
+    /// H.264 requires even dimensions and has a practical 4K limit.
     private static func evenPixelSize(for pointSize: CGSize, scale: CGFloat) -> CGSize {
         var width = pointSize.width * scale
         var height = pointSize.height * scale
@@ -252,7 +252,7 @@ final class ScreenRecordingService: NSObject {
 
     private func resumeFinish(with error: Error?) {
         guard let continuation = finishContinuation else {
-            // Nadie espera todavia: se guarda para que `stop()` termine sin esperar al respaldo.
+            // Nobody is waiting yet: store it so `stop()` finishes without waiting for the fallback.
             if stream != nil, finishResult == nil {
                 finishResult = error.map { .failure($0) } ?? .success(())
             }
@@ -286,7 +286,7 @@ final class ScreenRecordingService: NSObject {
         recordingOutput.map(ObjectIdentifier.init) == id
     }
 
-    /// Avisa una sola vez por sesion, aunque fallen el stream y la salida a la vez.
+    /// Reports only once per session, even if both the stream and the output fail.
     private func handleUnexpectedStop(_ error: Error?) {
         guard !isStopping, stream != nil, !didReportUnexpectedStop else { return }
         didReportUnexpectedStop = true
@@ -300,7 +300,7 @@ extension ScreenRecordingService: SCStreamDelegate {
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
         let id = ObjectIdentifier(stream)
         Task { @MainActor in
-            // Ignora avisos tardios de una sesion anterior (por ejemplo, despues de reiniciar).
+            // Ignore late callbacks from a previous session (for example, after a restart).
             guard self.isCurrent(stream: id) else { return }
             self.streamDidStop = true
             self.handleUnexpectedStop(error)
@@ -328,7 +328,7 @@ extension ScreenRecordingService: SCRecordingOutputDelegate {
     }
 }
 
-/// Salida vacia: los frames los escribe `SCRecordingOutput` directamente al archivo.
+/// Empty output: `SCRecordingOutput` writes the frames straight to the file.
 private final nonisolated class StreamSink: NSObject, SCStreamOutput {
     let queue = DispatchQueue(label: "com.burgos.sb-shot.stream-sink")
 

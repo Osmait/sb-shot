@@ -69,7 +69,7 @@ final class RecordingViewModel: ObservableObject {
         return String(format: "%02d:%02d", total / 60, total % 60)
     }
 
-    /// Inicia una grabacion o detiene la que esta en curso (el mismo atajo hace las dos cosas).
+    /// Starts a recording or stops the one in progress (the same shortcut does both).
     func toggle(fullscreen: Bool) {
         switch state {
         case .recording: stop()
@@ -84,7 +84,7 @@ final class RecordingViewModel: ObservableObject {
 
         Task {
             guard useCase.ensurePermission() else {
-                toast.show("Activa Grabación de pantalla en Ajustes del Sistema", systemImage: "lock.shield")
+                toast.show(String(localized: "Enable Screen Recording in System Settings"), systemImage: "lock.shield")
                 state = .idle
                 return
             }
@@ -119,7 +119,7 @@ final class RecordingViewModel: ObservableObject {
                 let url = try await recorder.stop()
                 await output.handleRecording(url)
             } catch {
-                toast.show("No se pudo guardar la grabación", systemImage: "exclamationmark.triangle")
+                toast.show(String(localized: "Couldn’t save the recording"), systemImage: "exclamationmark.triangle")
             }
             state = .idle
         }
@@ -132,7 +132,7 @@ final class RecordingViewModel: ObservableObject {
 
         Task {
             await recorder.cancel()
-            toast.show("Grabación descartada", systemImage: "trash")
+            toast.show(String(localized: "Recording discarded"), systemImage: "trash")
             state = .idle
         }
     }
@@ -155,7 +155,7 @@ final class RecordingViewModel: ObservableObject {
 
         if options.capturesMicrophone, await !(permissions.requestMicrophoneAccess()) {
             options.capturesMicrophone = false
-            toast.show("Sin acceso al micrófono: se graba sin voz", systemImage: "mic.slash")
+            toast.show(String(localized: "No microphone access: recording without voice"), systemImage: "mic.slash")
         }
 
         if countdownSeconds > 0 {
@@ -165,7 +165,7 @@ final class RecordingViewModel: ObservableObject {
             }
         }
 
-        // En grabaciones de ventana solo se captura esa ventana, asi que el resaltado no se veria.
+        // Window recordings only capture that window, so the click highlight wouldn't be visible.
         if case .window = selection {
             options.highlightsClicks = false
         }

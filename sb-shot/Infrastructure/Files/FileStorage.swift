@@ -1,11 +1,11 @@
 import AppKit
 import UniformTypeIdentifiers
 
-/// Archivos temporales, carpeta de guardado (con bookmark de sandbox) y codificacion de imagenes.
+/// Temporary files, save folder (with a sandbox bookmark) and image encoding.
 final class FileStorage {
     let temporaryDirectory: URL
 
-    /// Se llama cuando la carpeta personalizada ya no esta disponible y se vuelve a la predeterminada.
+    /// Called when the custom folder is no longer available and the default one is used again.
     var onSaveFolderUnavailable: (() -> Void)?
 
     private let defaults: UserDefaults
@@ -22,8 +22,8 @@ final class FileStorage {
 
     func fileName(prefix: String, fileExtension: String, date: Date = Date()) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "es_ES")
-        formatter.dateFormat = "yyyy-MM-dd 'a las' HH.mm.ss"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
         let cleanPrefix = Self.sanitizedPrefix(prefix)
         let base = cleanPrefix.isEmpty ? formatter.string(from: date) : "\(cleanPrefix) \(formatter.string(from: date))"
         return "\(base).\(fileExtension)"
@@ -33,13 +33,13 @@ final class FileStorage {
         uniqueURL(in: temporaryDirectory, fileName: fileName(prefix: prefix, fileExtension: fileExtension, date: date))
     }
 
-    /// Quita separadores de ruta y caracteres de control, y limita la longitud para que el nombre
-    /// completo (fecha, contador y extension incluidos) quede por debajo de 255 bytes.
+    /// Removes path separators and control characters, and limits the length so the full name
+    /// (date, counter and extension included) stays below 255 bytes.
     static func sanitizedPrefix(_ prefix: String) -> String {
         let forbidden = CharacterSet(charactersIn: "/:").union(.controlCharacters)
         var clean = String(String.UnicodeScalarView(prefix.unicodeScalars.map { forbidden.contains($0) ? "-" : $0 }))
         clean = clean.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Sin punto inicial para no crear archivos ocultos.
+        // No leading dot, to avoid creating hidden files.
         while clean.hasPrefix(".") {
             clean.removeFirst()
         }
@@ -51,15 +51,15 @@ final class FileStorage {
 
     private static let maxPrefixBytes = 150
 
-    /// Copia un archivo a la carpeta temporal (para no depender de archivos que se pueden borrar).
+    /// Copies a file to the temporary folder (so it doesn't depend on files that may be deleted).
     func temporaryCopy(of file: URL, prefix: String, date: Date = Date()) throws -> URL {
         let destination = temporaryURL(prefix: prefix, fileExtension: file.pathExtension, date: date)
         try FileManager.default.copyItem(at: file, to: destination)
         return destination
     }
 
-    /// Borra los temporales con mas de `age` segundos. Se llama al arrancar, cuando ningun archivo
-    /// de la carpeta esta en uso (las copias guardadas y el historial viven en otro sitio).
+    /// Deletes temporary files older than `age` seconds. Called at launch, when no file in the
+    /// folder is in use (saved copies and the history live elsewhere).
     func removeStaleTemporaryFiles(olderThan age: TimeInterval = 24 * 60 * 60) {
         let directory = temporaryDirectory
         Task.detached(priority: .utility) {
@@ -68,7 +68,7 @@ final class FileStorage {
     }
 
     private nonisolated static func removeFiles(in directory: URL, olderThan limit: Date) {
-        // Tambien las subcarpetas (exportaciones del editor de video), con todo su contenido.
+        // Subfolders too (video editor exports), with all their contents.
         let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey, .contentModificationDateKey]
         guard let contents = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: keys) else { return }
         for url in contents {
@@ -89,7 +89,7 @@ final class FileStorage {
         return Self.encode(cgImage, pointSize: image.size, as: Self.fileType(for: format))
     }
 
-    /// Codifica fuera del hilo principal.
+    /// Encodes off the main thread.
     func encodeInBackground(_ image: NSImage, as format: ImageFileFormat) async -> Data? {
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
         let size = image.size
@@ -106,7 +106,7 @@ final class FileStorage {
         return url
     }
 
-    /// Escribe datos ya codificados en la carpeta temporal, fuera del hilo principal.
+    /// Writes already encoded data to the temporary folder, off the main thread.
     func writeTemporary(_ data: Data, fileExtension: String, prefix: String) async throws -> URL {
         let url = temporaryURL(prefix: prefix, fileExtension: fileExtension)
         try await Task.detached(priority: .userInitiated) {
@@ -117,7 +117,7 @@ final class FileStorage {
 
     private nonisolated static func encode(_ cgImage: CGImage, pointSize: CGSize, as fileType: NSBitmapImageRep.FileType) -> Data? {
         let bitmap = NSBitmapImageRep(cgImage: cgImage)
-        // Conserva el tamano en puntos para que las capturas Retina se abran al tamano correcto.
+        // Keep the size in points so Retina screenshots open at the right size.
         bitmap.size = pointSize
         let properties: [NSBitmapImageRep.PropertyKey: Any] = fileType == .jpeg ? [.compressionFactor: 0.9] : [:]
         return bitmap.representation(using: fileType, properties: properties)
@@ -158,8 +158,8 @@ final class FileStorage {
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "Elegir"
-        panel.message = "Elige la carpeta donde se guardaran las capturas y grabaciones."
+        panel.prompt = String(localized: "Choose")
+        panel.message = String(localized: "Choose the folder where screenshots and recordings will be saved.")
 
         NSApp.activate(ignoringOtherApps: true)
         guard panel.runModal() == .OK, let url = panel.url, let bookmark = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) else {
@@ -175,7 +175,7 @@ final class FileStorage {
         resolvedFolder = nil
     }
 
-    /// Abre la carpeta de guardado en Finder, creandola si aun no existe.
+    /// Opens the save folder in Finder, creating it if it doesn't exist yet.
     func openSaveFolder() {
         let folder = saveFolder
         let isScoped = folder.startAccessingSecurityScopedResource()
@@ -188,7 +188,7 @@ final class FileStorage {
         NSWorkspace.shared.open(folder)
     }
 
-    /// Copia el archivo a la carpeta de guardado y devuelve su nueva ubicacion.
+    /// Copies the file to the save folder and returns its new location.
     func saveToFolder(_ file: URL, fileName: String? = nil) throws -> URL {
         let folder = saveFolder
         let isScoped = folder.startAccessingSecurityScopedResource()
@@ -204,13 +204,13 @@ final class FileStorage {
         return destination
     }
 
-    /// Indica si el archivo esta directamente dentro de la carpeta de guardado actual.
+    /// Whether the file is directly inside the current save folder.
     func isInSaveFolder(_ url: URL) -> Bool {
         url.deletingLastPathComponent().standardizedFileURL.path == saveFolder.standardizedFileURL.path
     }
 
-    /// Pide una ubicacion con el panel de guardado y copia el archivo ahi.
-    /// Devuelve `nil` si el usuario cancela y lanza un error si la copia falla.
+    /// Asks for a location with the save panel and copies the file there.
+    /// Returns `nil` if the user cancels and throws if the copy fails.
     func saveWithPanel(_ file: URL, suggestedName: String? = nil) throws -> URL? {
         let panel = NSSavePanel()
         panel.canCreateDirectories = true
@@ -228,8 +228,8 @@ final class FileStorage {
             return url
         }
 
-        // Reemplaza sin borrar antes el destino: si algo falla, el archivo original sigue intacto.
-        let staging = uniqueURL(in: temporaryDirectory, fileName: "reemplazo-\(UUID().uuidString).\(file.pathExtension)")
+        // Replace without deleting the destination first: if something fails, the original file stays intact.
+        let staging = uniqueURL(in: temporaryDirectory, fileName: "replacement-\(UUID().uuidString).\(file.pathExtension)")
         try manager.copyItem(at: file, to: staging)
         do {
             _ = try manager.replaceItemAt(url, withItemAt: staging)
@@ -246,8 +246,8 @@ final class FileStorage {
 
     // MARK: - Private
 
-    /// Resuelve el bookmark una sola vez. Si ya no se puede resolver, lo borra para que los ajustes
-    /// muestren la carpeta predeterminada que realmente se usa.
+    /// Resolves the bookmark only once. If it can no longer be resolved, it is deleted so Settings
+    /// shows the default folder that is actually used.
     private func resolvedSaveFolder() -> URL? {
         if let resolvedFolder {
             return resolvedFolder

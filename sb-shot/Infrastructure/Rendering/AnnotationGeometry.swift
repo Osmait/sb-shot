@@ -28,7 +28,7 @@ nonisolated enum AnnotationMetrics {
         return CGSize(width: ceil(size.width), height: ceil(size.height))
     }
 
-    /// Rectangulo que ocupa un texto (incluye el fondo si lo tiene). `origin` es la esquina superior izquierda.
+    /// Rectangle occupied by a text (including its background, if any). `origin` is the top-left corner.
     static func textRect(content: String, origin: CGPoint, style: AnnotationStyle) -> CGRect {
         let size = textSize(content, fontSize: style.fontSize)
         guard style.textBackground else {

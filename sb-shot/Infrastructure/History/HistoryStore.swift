@@ -20,7 +20,7 @@ struct HistoryEntry: Codable, Identifiable, Equatable {
         self.createdAt = createdAt
     }
 
-    /// Solo `fileName` es imprescindible; el resto se deduce si falta o no se reconoce.
+    /// Only `fileName` is required; the rest is inferred if missing or unrecognized.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         fileName = try container.decode(String.self, forKey: .fileName)
@@ -38,7 +38,7 @@ struct HistoryEntry: Codable, Identifiable, Equatable {
     }
 }
 
-/// Decodifica cada entrada por separado para que una entrada danada no invalide todo el indice.
+/// Decodes each entry separately so a corrupted entry doesn't invalidate the whole index.
 private struct LossyHistoryEntry: Decodable {
     let entry: HistoryEntry?
 
@@ -47,7 +47,7 @@ private struct LossyHistoryEntry: Decodable {
     }
 }
 
-/// Guarda una copia de cada captura y grabacion en Application Support para el historial.
+/// Keeps a copy of every screenshot and recording in Application Support for the history.
 @MainActor
 final class HistoryStore: ObservableObject {
     @Published private(set) var entries: [HistoryEntry] = []
@@ -55,7 +55,7 @@ final class HistoryStore: ObservableObject {
     let directory: URL
     private let indexURL: URL
     private let limit: Int
-    /// Falso si el indice no se pudo leer ni respaldar: no se sobrescribe para no perder las entradas.
+    /// False if the index could neither be read nor backed up: it isn't overwritten so entries aren't lost.
     private var canPersist = true
 
     init(limit: Int = 100, directory: URL? = nil) {
@@ -125,7 +125,7 @@ final class HistoryStore: ObservableObject {
         }
     }
 
-    /// Guarda el indice ilegible como `.bak` antes de que el siguiente `persist()` lo sobrescriba.
+    /// Saves the unreadable index as `.bak` before the next `persist()` overwrites it.
     private func backUpIndex() {
         var backup = directory.appendingPathComponent("index.json.bak")
         if FileManager.default.fileExists(atPath: backup.path) {
@@ -138,8 +138,8 @@ final class HistoryStore: ObservableObject {
         }
     }
 
-    /// Borra archivos que ningun indice referencia. No se hace si hay respaldos, porque sus
-    /// archivos solo estan referenciados ahi.
+    /// Deletes files that no index references. Skipped if there are backups, because their
+    /// files are only referenced there.
     private func removeOrphanedFiles() {
         guard let contents = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isRegularFileKey], options: .skipsHiddenFiles), !contents.contains(where: { $0.pathExtension == "bak" }) else { return }
 
