@@ -15,7 +15,7 @@ struct WallpaperTile: View {
                 if let thumbnail = provider.thumbnail {
                     Image(decorative: thumbnail, scale: 1)
                         .resizable()
-                        .aspectRatio(contentMode: .fill)
+                        .scaledToFill()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .clipped()
                         .overlay(Color.black.opacity(0.25))

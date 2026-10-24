@@ -23,11 +23,18 @@ private func waitUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async
 
 @MainActor
 struct FileStorageFixesTests {
-    private func makeStorage() throws -> (FileStorage, URL, UserDefaults, String) {
+    private struct StorageFixture {
+        let storage: FileStorage
+        let temp: URL
+        let defaults: UserDefaults
+        let suite: String
+    }
+
+    private func makeStorage() throws -> StorageFixture {
         let temp = try makeTempDir("fs")
         let suite = "sbshot.tests.fs.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
-        return (FileStorage(defaults: defaults, temporaryDirectory: temp), temp, defaults, suite)
+        return StorageFixture(storage: FileStorage(defaults: defaults, temporaryDirectory: temp), temp: temp, defaults: defaults, suite: suite)
     }
 
     @Test func sanitizedPrefixReplacesSeparatorsAndControlChars() {
@@ -53,7 +60,8 @@ struct FileStorageFixesTests {
     }
 
     @Test func fileNameHasNoSlashAndWritingSucceedsWithHostilePrefix() async throws {
-        let (storage, temp, defaults, suite) = try makeStorage()
+        let fixture = try makeStorage()
+        let (storage, temp, defaults, suite) = (fixture.storage, fixture.temp, fixture.defaults, fixture.suite)
         defer {
             try? FileManager.default.removeItem(at: temp)
             defaults.removePersistentDomain(forName: suite)
@@ -70,7 +78,8 @@ struct FileStorageFixesTests {
     }
 
     @Test func emptyPrefixUsesOnlyDate() throws {
-        let (storage, temp, defaults, suite) = try makeStorage()
+        let fixture = try makeStorage()
+        let (storage, temp, defaults, suite) = (fixture.storage, fixture.temp, fixture.defaults, fixture.suite)
         defer {
             try? FileManager.default.removeItem(at: temp)
             defaults.removePersistentDomain(forName: suite)
@@ -83,7 +92,8 @@ struct FileStorageFixesTests {
     }
 
     @Test func removesStaleFilesAndFoldersButKeepsRecentOnes() async throws {
-        let (storage, temp, defaults, suite) = try makeStorage()
+        let fixture = try makeStorage()
+        let (storage, temp, defaults, suite) = (fixture.storage, fixture.temp, fixture.defaults, fixture.suite)
         let outside = try makeTempDir("outside")
         defer {
             try? FileManager.default.removeItem(at: temp)

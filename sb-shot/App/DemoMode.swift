@@ -215,15 +215,28 @@ enum DemoMode {
         let hero = try await hero()
 
         // Newest first, with varied dates.
-        let samples: [(source: Any, ext: String, kind: HistoryEntry.Kind, minutesAgo: Double)] = [
-            (NSImage(cgImage: hero, size: CGSize(width: hero.width, height: hero.height)), "png", .image, 4),
-            (dashboard, "png", .image, 18),
-            (videoURL, "mp4", .video, 52),
-            (code, "png", .image, 140),
-            (DemoSamples.crop(tasks, to: CGRect(x: 0, y: 0, width: 560, height: 420)), "gif", .gif, 60 * 5),
-            (tasks, "png", .image, 60 * 26),
-            (DemoSamples.crop(dashboard, to: CGRect(x: 240, y: 260, width: 600, height: 300)), "png", .image, 60 * 30),
-            (DemoSamples.crop(code, to: CGRect(x: 200, y: 36, width: 560, height: 380)), "png", .image, 60 * 52),
+        struct Sample {
+            let source: Any
+            let ext: String
+            let kind: HistoryEntry.Kind
+            let minutesAgo: Double
+
+            init(_ source: Any, _ ext: String, _ kind: HistoryEntry.Kind, _ minutesAgo: Double) {
+                self.source = source
+                self.ext = ext
+                self.kind = kind
+                self.minutesAgo = minutesAgo
+            }
+        }
+        let samples: [Sample] = [
+            Sample(NSImage(cgImage: hero, size: CGSize(width: hero.width, height: hero.height)), "png", .image, 4),
+            Sample(dashboard, "png", .image, 18),
+            Sample(videoURL, "mp4", .video, 52),
+            Sample(code, "png", .image, 140),
+            Sample(DemoSamples.crop(tasks, to: CGRect(x: 0, y: 0, width: 560, height: 420)), "gif", .gif, 60 * 5),
+            Sample(tasks, "png", .image, 60 * 26),
+            Sample(DemoSamples.crop(dashboard, to: CGRect(x: 240, y: 260, width: 600, height: 300)), "png", .image, 60 * 30),
+            Sample(DemoSamples.crop(code, to: CGRect(x: 200, y: 36, width: 560, height: 380)), "png", .image, 60 * 52),
         ]
         var entries: [HistoryEntry] = []
         for sample in samples {

@@ -84,8 +84,15 @@ private func makeRGBAImage(width: Int, height: Int, draw: (CGContext) -> Void) -
     return context.makeImage()!
 }
 
+private struct Pixel {
+    let r: UInt8
+    let g: UInt8
+    let b: UInt8
+    let a: UInt8
+}
+
 /// Reads an RGBA pixel (top-left origin) by redrawing the image into a known buffer.
-private func pixel(_ image: CGImage, x: Int, y: Int) -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8) {
+private func pixel(_ image: CGImage, x: Int, y: Int) -> Pixel {
     var data = [UInt8](repeating: 0, count: image.width * image.height * 4)
     data.withUnsafeMutableBytes { buffer in
         let context = CGContext(
@@ -96,7 +103,7 @@ private func pixel(_ image: CGImage, x: Int, y: Int) -> (r: UInt8, g: UInt8, b: 
         context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
     }
     let i = (y * image.width + x) * 4
-    return (data[i], data[i + 1], data[i + 2], data[i + 3])
+    return Pixel(r: data[i], g: data[i + 1], b: data[i + 2], a: data[i + 3])
 }
 
 // MARK: - 1 and 2: use case
