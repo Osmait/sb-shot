@@ -1,23 +1,25 @@
 import AVFoundation
 import CoreImage
 
-/// Fondo para videos: el video queda centrado sobre un degradado, con margen, esquinas redondeadas y sombra.
+/// Video background: the video is centered over a gradient or an image, with padding, rounded corners and a shadow.
 nonisolated struct VideoBackgroundStyle: Sendable {
     var startColor: CGColor
     var endColor: CGColor
-    /// Margen y radio en puntos de un video de referencia de 1600 px; se escalan con el tamano real.
+    /// Background image (the desktop wallpaper). When set, it replaces the gradient.
+    var image: CGImage?
+    /// Padding and radius in points for a 1600 px reference video; they scale with the actual size.
     var padding: CGFloat
     var cornerRadius: CGFloat
     var shadow: Bool
-    /// Ancho / alto del lienzo, o `nil` para ajustarse al video.
+    /// Canvas width / height, or `nil` to fit the video.
     var aspectRatio: CGFloat?
 }
 
 nonisolated enum VideoBackgroundCompositor {
     struct Layout {
-        /// Tamano del lienzo final en pixeles (par, para H.264).
+        /// Final canvas size in pixels (even, for H.264).
         let renderSize: CGSize
-        /// Donde se dibuja el video, en coordenadas de Core Image (origen abajo-izquierda).
+        /// Where the video is drawn, in Core Image coordinates (bottom-left origin).
         let contentRect: CGRect
         let unit: CGFloat
     }
@@ -41,7 +43,7 @@ nonisolated enum VideoBackgroundCompositor {
         return Layout(renderSize: size, contentRect: CGRect(origin: origin, size: content), unit: unit)
     }
 
-    /// Composicion que aplica el fondo a cada fotograma. Sirve para la reproduccion, la exportacion MP4 y el GIF.
+    /// Composition that applies the background to every frame. Used for playback, MP4 export and GIF.
     static func makeComposition(
         for asset: AVAsset,
         style: VideoBackgroundStyle,
@@ -53,7 +55,7 @@ nonisolated enum VideoBackgroundCompositor {
         }
         let videoSize = try await track.load(.naturalSize)
         let layout = layout(videoSize: videoSize, style: style, outputScale: outputScale)
-        let background = backgroundImage(layout: layout, style: style)
+        let background = renderedBackground(layout: layout, style: style)
         let mask = roundedRect(layout.contentRect, radius: style.cornerRadius * layout.unit, color: .white)
         let transform = CGAffineTransform(a: outputScale, b: 0, c: 0, d: outputScale, tx: layout.contentRect.minX, ty: layout.contentRect.minY)
         let extent = CGRect(origin: .zero, size: layout.renderSize)
@@ -75,23 +77,46 @@ nonisolated enum VideoBackgroundCompositor {
 
     // MARK: - Private
 
+    /// The background doesn't change between frames: rasterize it once (gradient or image + blurred shadow)
+    /// to avoid re-evaluating the Core Image recipe on every frame during playback and export.
+    private static func renderedBackground(layout: Layout, style: VideoBackgroundStyle) -> CIImage {
+        let recipe = backgroundImage(layout: layout, style: style)
+        let extent = CGRect(origin: .zero, size: layout.renderSize)
+        let context = CIContext(options: [.cacheIntermediates: false])
+        guard let cgImage = context.createCGImage(recipe, from: extent) else { return recipe }
+        return CIImage(cgImage: cgImage)
+    }
+
     private static func backgroundImage(layout: Layout, style: VideoBackgroundStyle) -> CIImage {
         let extent = CGRect(origin: .zero, size: layout.renderSize)
-        let gradient = CIFilter(name: "CILinearGradient", parameters: [
-            "inputPoint0": CIVector(x: 0, y: extent.height),
-            "inputPoint1": CIVector(x: extent.width, y: 0),
-            "inputColor0": CIColor(cgColor: style.startColor),
-            "inputColor1": CIColor(cgColor: style.endColor),
-        ])?.outputImage?.cropped(to: extent) ?? CIImage(color: .black).cropped(to: extent)
+        let fill = style.image.map { imageFill($0, extent: extent) } ?? gradientFill(style, extent: extent)
 
-        guard style.shadow else { return gradient }
+        guard style.shadow else { return fill }
 
         let shadowRect = layout.contentRect.offsetBy(dx: 0, dy: -12 * layout.unit)
         let shadow = roundedRect(shadowRect, radius: style.cornerRadius * layout.unit, color: CIColor(red: 0, green: 0, blue: 0, alpha: 0.45))
             .clampedToExtent()
             .applyingGaussianBlur(sigma: 18 * layout.unit)
             .cropped(to: extent)
-        return shadow.composited(over: gradient)
+        return shadow.composited(over: fill)
+    }
+
+    private static func imageFill(_ image: CGImage, extent: CGRect) -> CIImage {
+        let source = CIImage(cgImage: image)
+        let rect = CGRect.aspectFill(source.extent.size, in: extent)
+        let scale = rect.width / max(source.extent.width, 1)
+        return source
+            .transformed(by: CGAffineTransform(translationX: rect.minX, y: rect.minY).scaledBy(x: scale, y: scale))
+            .cropped(to: extent)
+    }
+
+    private static func gradientFill(_ style: VideoBackgroundStyle, extent: CGRect) -> CIImage {
+        CIFilter(name: "CILinearGradient", parameters: [
+            "inputPoint0": CIVector(x: 0, y: extent.height),
+            "inputPoint1": CIVector(x: extent.width, y: 0),
+            "inputColor0": CIColor(cgColor: style.startColor),
+            "inputColor1": CIColor(cgColor: style.endColor),
+        ])?.outputImage?.cropped(to: extent) ?? CIImage(color: .black).cropped(to: extent)
     }
 
     private static func roundedRect(_ rect: CGRect, radius: CGFloat, color: CIColor) -> CIImage {

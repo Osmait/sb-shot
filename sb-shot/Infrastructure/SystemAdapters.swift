@@ -4,16 +4,24 @@ import AppKit
 final class SelectionOverlayRegionSelector: RegionSelecting {
     private let capturer: ScreenCaptureProviding
     private var activeController: SelectionOverlayController?
+    /// Set before awaiting the snapshots so two shortcuts in a row don't open two overlays.
+    private var isSelecting = false
 
     init(capturer: ScreenCaptureProviding) {
         self.capturer = capturer
     }
 
     func select(options: SelectionOptions) async -> SelectionResult? {
-        guard activeController == nil else { return nil }
+        guard !isSelecting else { return nil }
+        isSelecting = true
+        defer { isSelecting = false }
 
         let needsSnapshots = options.freezeScreen || options.showsMagnifier
-        let snapshots = await needsSnapshots ? ((try? capturer.displaySnapshots()) ?? [:]) : [:]
+        // Desktop icons are only hidden in the frozen image; the magnifier shows the real screen.
+        let hidesIcons = options.freezeScreen && options.hidesDesktopIcons
+        let snapshots = await needsSnapshots
+            ? ((try? capturer.displaySnapshots(hidingDesktopIcons: hidesIcons)) ?? [:])
+            : [:]
 
         var effectiveOptions = options
         if snapshots.isEmpty {
@@ -36,6 +44,34 @@ final class SelectionOverlayRegionSelector: RegionSelecting {
             let displayID = ScreenGeometry.displayID(of: screen)
         else { return nil }
         return .display(id: displayID, frame: screen.frame)
+    }
+}
+
+/// Activates sb-shot to receive keyboard input and then returns focus to the app that was frontmost.
+@MainActor
+enum AppFocus {
+    /// `frontmostApplication` is slow to reflect a reactivation; the restored app is remembered briefly.
+    private static var recentlyRestored: (app: NSRunningApplication, date: Date)?
+
+    /// Activates the app and returns the external app that was frontmost, to pass later to `restore`.
+    static func activate() -> NSRunningApplication? {
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        var previous = NSWorkspace.shared.frontmostApplication
+        if previous?.processIdentifier == ownPID {
+            previous = nil
+            if let recent = recentlyRestored, Date().timeIntervalSince(recent.date) < 1 {
+                previous = recent.app
+            }
+        }
+        recentlyRestored = nil
+        NSApp.activate()
+        return previous
+    }
+
+    static func restore(_ app: NSRunningApplication?) {
+        guard let app, !app.isTerminated else { return }
+        recentlyRestored = (app, Date())
+        app.activate()
     }
 }
 

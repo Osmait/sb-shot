@@ -8,10 +8,19 @@ enum VideoProcessingError: Error {
     case exportFailed
 }
 
-/// Convierte un video a GIF animado con `AVAssetImageGenerator` + ImageIO. Se ejecuta fuera del hilo principal.
+/// Converts a video to an animated GIF with `AVAssetImageGenerator` + ImageIO. Runs off the main thread.
 nonisolated enum GifExporter {
-    /// ImageIO conserva todos los cuadros en memoria hasta finalizar, asi que se limita su numero.
+    /// ImageIO keeps every frame in memory until finalizing, so their number is capped.
     private static let maxFrames = 600
+
+    /// Frame count and step (in seconds) for a range: long ranges spread `maxFrames` across the whole range.
+    static func frameSampling(duration seconds: Double, framesPerSecond: Int) -> (frameCount: Int, step: Double, isLong: Bool) {
+        let requestedFrames = seconds * Double(max(framesPerSecond, 1))
+        let isLong = requestedFrames > Double(maxFrames)
+        let frameCount = isLong ? maxFrames : max(Int(requestedFrames), 1)
+        let step = isLong ? seconds / Double(maxFrames) : 1.0 / Double(max(framesPerSecond, 1))
+        return (frameCount, step, isLong)
+    }
     static func export(
         videoURL: URL,
         to outputURL: URL,
@@ -24,21 +33,21 @@ nonisolated enum GifExporter {
         let duration = try await asset.load(.duration)
         let range = timeRange ?? CMTimeRange(start: .zero, duration: duration)
 
-        // En clips largos se bajan los fps y el ancho para mantener la memoria y el tamano del GIF acotados.
-        let requestedFrames = range.duration.seconds * Double(max(framesPerSecond, 1))
-        let fps = requestedFrames > Double(maxFrames)
-            ? max(Int(Double(maxFrames) / max(range.duration.seconds, 1)), 2)
-            : max(framesPerSecond, 1)
-        let width = requestedFrames > Double(maxFrames) ? min(maxWidth, 720) : maxWidth
-        let frameCount = min(max(Int(range.duration.seconds * Double(fps)), 1), maxFrames)
+        // Long clips spread `maxFrames` frames across the whole range (fractional step) and lower the width
+        // to keep memory and GIF size bounded without cutting off the end.
+        let seconds = range.duration.seconds
+        let sampling = frameSampling(duration: seconds, framesPerSecond: framesPerSecond)
+        let frameCount = sampling.frameCount
+        let step = sampling.step
+        let width = sampling.isLong ? min(maxWidth, 720) : maxWidth
         let times = (0 ..< frameCount).map {
-            CMTimeAdd(range.start, CMTime(seconds: Double($0) / Double(fps), preferredTimescale: 600))
+            CMTimeAdd(range.start, CMTime(seconds: Double($0) * step, preferredTimescale: 600))
         }
 
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.5 / Double(fps), preferredTimescale: 600)
+        generator.requestedTimeToleranceAfter = CMTime(seconds: step / 2, preferredTimescale: 600)
         generator.maximumSize = CGSize(width: width, height: 10000)
         if let background {
             generator.videoComposition = try await VideoBackgroundCompositor.makeComposition(for: asset, style: background)
@@ -53,7 +62,7 @@ nonisolated enum GifExporter {
             kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0],
         ] as CFDictionary)
 
-        let delay = 1.0 / Double(fps)
+        let delay = step
         let frameProperties = [
             kCGImagePropertyGIFDictionary: [
                 kCGImagePropertyGIFDelayTime: delay,
@@ -64,12 +73,14 @@ nonisolated enum GifExporter {
         var added = 0
         var lastImage: CGImage?
         for await result in generator.images(for: times) {
-            // Si un frame falla se repite el anterior para no desfasar la animacion.
+            if Task.isCancelled { break }
+            // If a frame fails, repeat the previous one so the animation stays in sync.
             guard let image = (try? result.image) ?? lastImage else { continue }
             CGImageDestinationAddImage(destination, image, frameProperties)
             lastImage = image
             added += 1
         }
+        try Task.checkCancellation()
 
         while added < frameCount, let lastImage {
             CGImageDestinationAddImage(destination, lastImage, frameProperties)
@@ -84,7 +95,7 @@ nonisolated enum GifExporter {
 }
 
 enum VideoExporter {
-    /// Exporta un tramo del video a MP4, opcionalmente sin audio, con una altura maxima y unos fps distintos.
+    /// Exports a range of the video to MP4, optionally without audio, with a maximum height and a different frame rate.
     nonisolated static func export(
         videoURL: URL,
         to outputURL: URL,
@@ -109,7 +120,7 @@ enum VideoExporter {
 
         for mediaType in mediaTypes {
             for track in try await asset.loadTracks(withMediaType: mediaType) {
-                // Las pistas de audio pueden empezar despues o terminar antes que el video.
+                // Audio tracks may start later or end earlier than the video.
                 let trackRange = try await track.load(.timeRange).intersection(range)
                 guard trackRange.duration > .zero else { continue }
 
@@ -133,7 +144,7 @@ enum VideoExporter {
         let changesFPS = framesPerSecond.map { Float($0) < sourceFPS - 0.5 } ?? false
 
         if let background {
-            // La altura maxima se aplica al lienzo completo (video + fondo).
+            // The maximum height applies to the whole canvas (video + background).
             let fullSize = VideoBackgroundCompositor.layout(videoSize: naturalSize, style: background).renderSize
             let scale = maxHeight.map { min($0 / max(fullSize.height, 1), 1) } ?? 1
             session.videoComposition = try await VideoBackgroundCompositor.makeComposition(
@@ -184,7 +195,7 @@ enum VideoExporter {
         return videoComposition
     }
 
-    /// Fotogramas repartidos a lo largo del video, para la barra de recorte.
+    /// Frames spread across the video, for the trim bar.
     static func filmstrip(for videoURL: URL, count: Int, height: CGFloat) async -> [NSImage] {
         let asset = AVURLAsset(url: videoURL)
         guard let duration = try? await asset.load(.duration), duration.seconds > 0 else { return [] }

@@ -24,32 +24,32 @@ struct MenuBarView: View {
 
     var body: some View {
         if recording.isRecording {
-            Button("Detener grabación (\(recording.elapsedText))", systemImage: "stop.circle.fill") {
+            Button("Stop Recording (\(recording.elapsedText))", systemImage: "stop.circle.fill") {
                 recording.stop()
             }
             .globalShortcut(settings.shortcut(for: .recordArea))
 
-            Button("Reiniciar grabación", systemImage: "arrow.counterclockwise") {
+            Button("Restart Recording", systemImage: "arrow.counterclockwise") {
                 recording.restart()
             }
 
-            Button("Descartar grabación", systemImage: "trash") {
+            Button("Discard Recording", systemImage: "trash") {
                 recording.cancel()
             }
 
             Divider()
         }
 
-        Section("Capturar") {
+        Section("Capture") {
             actionButton(.captureArea)
             actionButton(.capturePreviousArea)
                 .disabled(settings.lastCaptureArea == nil)
             actionButton(.captureFullscreen)
             actionButton(.captureWindow)
 
-            Menu("Captura con temporizador") {
+            Menu("Timed Capture") {
                 ForEach([3, 5, 10], id: \.self) { seconds in
-                    Button("\(seconds) segundos") {
+                    Button("\(seconds) seconds") {
                         container.captureViewModel.capture(.timed(seconds: seconds))
                     }
                 }
@@ -58,43 +58,43 @@ struct MenuBarView: View {
             actionButton(.captureText)
         }
 
-        Section("Grabar") {
+        Section("Record") {
             actionButton(.recordArea)
                 .disabled(recording.isBusy)
             actionButton(.recordFullscreen)
                 .disabled(recording.isBusy)
 
-            Picker("Formato", selection: $settings.recordingFormat) {
+            Picker("Format", selection: $settings.recordingFormat) {
                 ForEach(RecordingFormat.allCases) { format in
                     Text(format.title).tag(format)
                 }
             }
 
-            Toggle("Grabar micrófono", isOn: $settings.recordingMicrophone)
-            Toggle("Grabar audio del sistema", isOn: $settings.recordingSystemAudio)
+            Toggle("Record Microphone", isOn: $settings.recordingMicrophone)
+            Toggle("Record System Audio", isOn: $settings.recordingSystemAudio)
         }
 
         Divider()
 
-        Button("Anotar imagen…", systemImage: "pencil.and.scribble") {
+        Button("Annotate Image…", systemImage: "pencil.and.scribble") {
             container.captureViewModel.annotateImageFile()
         }
 
         actionButton(.openHistory)
 
-        Button("Abrir carpeta de capturas", systemImage: "folder") {
-            NSWorkspace.shared.open(container.fileStorage.saveFolder)
+        Button("Open Screenshots Folder", systemImage: "folder") {
+            container.fileStorage.openSaveFolder()
         }
 
         Divider()
 
-        Button("Ajustes…") {
+        Button("Settings…") {
             NSApp.activate(ignoringOtherApps: true)
             openSettings()
         }
         .keyboardShortcut(",", modifiers: .command)
 
-        Button("Salir de sb-shot") {
+        Button("Quit sb-shot") {
             NSApplication.shared.terminate(nil)
         }
         .keyboardShortcut("q", modifiers: .command)

@@ -18,14 +18,14 @@ enum CaptureAction: String, CaseIterable, Codable, Identifiable {
 
     var title: String {
         switch self {
-        case .captureArea: "Capturar área o ventana"
-        case .capturePreviousArea: "Capturar área anterior"
-        case .captureFullscreen: "Capturar pantalla completa"
-        case .captureWindow: "Capturar ventana"
-        case .captureText: "Capturar texto (OCR)"
-        case .recordArea: "Grabar área o ventana"
-        case .recordFullscreen: "Grabar pantalla completa"
-        case .openHistory: "Abrir historial"
+        case .captureArea: String(localized: "Capture Area or Window")
+        case .capturePreviousArea: String(localized: "Capture Previous Area")
+        case .captureFullscreen: String(localized: "Capture Fullscreen")
+        case .captureWindow: String(localized: "Capture Window")
+        case .captureText: String(localized: "Capture Text (OCR)")
+        case .recordArea: String(localized: "Record Area or Window")
+        case .recordFullscreen: String(localized: "Record Fullscreen")
+        case .openHistory: String(localized: "Open History")
         }
     }
 
@@ -81,7 +81,7 @@ struct GlobalShortcut: Codable, Equatable, Hashable {
 
 // MARK: - Selection
 
-/// Resultado de una seleccion en pantalla. Las coordenadas son globales de AppKit (origen abajo-izquierda).
+/// Result of an on-screen selection. Coordinates are AppKit global (bottom-left origin).
 enum ScreenSelection: Equatable {
     case area(CGRect)
     case window(id: CGWindowID, frame: CGRect)
@@ -109,11 +109,13 @@ nonisolated struct SelectionOptions {
     var freezeScreen = false
     var showsMagnifier = true
     var showsCrosshair = true
+    /// Hides the desktop icons in the frozen image (`freezeScreen`).
+    var hidesDesktopIcons = false
 }
 
 struct SelectionResult {
     let selection: ScreenSelection
-    /// Imagen ya recortada de la pantalla congelada, si la seleccion se hizo sobre una captura fija.
+    /// Image already cropped from the frozen screen, if the selection was made over a still capture.
     let frozenImage: NSImage?
 }
 
@@ -169,7 +171,7 @@ enum RecordingFormat: String, CaseIterable, Codable, Identifiable {
     var title: String {
         switch self {
         case .mp4: "Video (MP4)"
-        case .gif: "GIF animado"
+        case .gif: String(localized: "Animated GIF")
         }
     }
 }
@@ -199,7 +201,7 @@ struct CaptureItem: Identifiable {
     let id = UUID()
     var content: Content
     var thumbnail: NSImage
-    /// Archivo en disco listo para arrastrar, copiar o mover.
+    /// File on disk ready to drag, copy, or move.
     var fileURL: URL
     let createdAt = Date()
 
@@ -235,8 +237,8 @@ enum QuickAccessPosition: String, CaseIterable, Codable, Identifiable {
 
     var title: String {
         switch self {
-        case .bottomLeft: "Abajo a la izquierda"
-        case .bottomRight: "Abajo a la derecha"
+        case .bottomLeft: String(localized: "Bottom Left")
+        case .bottomRight: String(localized: "Bottom Right")
         }
     }
 }

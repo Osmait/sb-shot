@@ -1,10 +1,17 @@
 import AppKit
 import SwiftUI
 
-/// Aviso flotante breve en la parte inferior de la pantalla ("Copiado", "Guardado"...).
+/// Short floating notice at the bottom of the screen ("Copied", "Saved"...).
 final class ToastController: ToastPresenting {
     private var panel: NSPanel?
     private var hideTask: Task<Void, Never>?
+    /// Changes with every new notice, so the end of a previous fade-out doesn't hide the current one.
+    private var generation = 0
+
+    /// A notice is on screen (or fading out). Visible for tests.
+    var hasPanel: Bool {
+        panel != nil
+    }
 
     func show(_ message: String, systemImage: String) {
         present(ToastView(message: message, systemImage: systemImage, showsProgress: false))
@@ -19,19 +26,21 @@ final class ToastController: ToastPresenting {
     func hide() {
         hideTask?.cancel()
         guard let panel else { return }
+        let hidingGeneration = generation
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.2
             panel.animator().alphaValue = 0
         } completionHandler: {
             Task { @MainActor [weak self] in
-                guard self?.panel === panel else { return }
+                guard let self, self.panel === panel, generation == hidingGeneration else { return }
                 panel.orderOut(nil)
-                self?.panel = nil
+                self.panel = nil
             }
         }
     }
 
     private func present(_ view: ToastView) {
+        generation += 1
         let hosting = NSHostingView(rootView: view)
         let size = hosting.fittingSize
 
@@ -51,8 +60,12 @@ final class ToastController: ToastPresenting {
                 panel.animator().alphaValue = 1
             }
         } else {
-            panel.alphaValue = 1
             panel.orderFrontRegardless()
+            // Replaces a fade-out that may be in progress.
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.1
+                panel.animator().alphaValue = 1
+            }
         }
         self.panel = panel
     }

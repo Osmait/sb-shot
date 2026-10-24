@@ -1,12 +1,12 @@
 import AppKit
 import SwiftUI
 
-/// Distribucion del documento en el lienzo de salida: recorte, padding del fondo y desplazamiento de la imagen.
-struct RenderLayout {
+/// Layout of the document on the output canvas: crop, background padding, and image offset.
+nonisolated struct RenderLayout: Sendable {
     let outputSize: CGSize
-    /// Donde se dibuja la imagen (recortada) dentro del lienzo de salida.
+    /// Where the (cropped) image is drawn within the output canvas.
     let contentRect: CGRect
-    /// Parte visible de la imagen, en coordenadas de la imagen.
+    /// Visible part of the image, in image coordinates.
     let visibleRect: CGRect
     let background: BackgroundSettings?
 
@@ -20,7 +20,7 @@ struct RenderLayout {
         visibleRect = visible
         self.background = background
 
-        // Con una proporcion fija el lienzo crece en un solo eje y la imagen queda centrada.
+        // With a fixed aspect ratio the canvas grows along a single axis and the image stays centered.
         var size = CGSize(width: visible.width + padding * 2, height: visible.height + padding * 2)
         if let ratio = background?.aspect.ratio {
             if size.width / max(size.height, 1) < ratio {
@@ -55,10 +55,20 @@ struct RenderLayout {
     }
 }
 
-/// Dibuja documentos del editor con CoreGraphics. Lo usan tanto el lienzo como la exportacion,
-/// asi lo que se ve en pantalla coincide con la imagen final.
-struct AnnotationRenderer {
+/// Draws editor documents with CoreGraphics. Used by both the canvas and the export,
+/// so what's on screen matches the final image. It doesn't depend on the main thread, so the export
+/// can run in the background.
+nonisolated struct AnnotationRenderer: Sendable {
     func render(document: EditorDocument, sources: RenderSources) -> NSImage {
+        let layout = RenderLayout(document: document, imageSize: sources.pointSize)
+        guard let output = renderImage(document: document, sources: sources) else {
+            return NSImage(cgImage: sources.base, size: sources.pointSize)
+        }
+        return NSImage(cgImage: output, size: layout.outputSize)
+    }
+
+    /// Full-resolution render as a `CGImage`. Safe off the main thread.
+    func renderImage(document: EditorDocument, sources: RenderSources) -> CGImage? {
         let layout = RenderLayout(document: document, imageSize: sources.pointSize)
         let scale = sources.pixelScale
         let width = max(Int((layout.outputSize.width * scale).rounded()), 1)
@@ -74,23 +84,17 @@ struct AnnotationRenderer {
                 space: CGColorSpace.renderable(for: sources.base),
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
             )
-        else {
-            return NSImage(cgImage: sources.base, size: sources.pointSize)
-        }
+        else { return nil }
 
         context.translateBy(x: 0, y: CGFloat(height))
         context.scaleBy(x: scale, y: -scale)
         context.interpolationQuality = .high
 
         draw(document: document, layout: layout, sources: sources, in: context)
-
-        guard let output = context.makeImage() else {
-            return NSImage(cgImage: sources.base, size: sources.pointSize)
-        }
-        return NSImage(cgImage: output, size: layout.outputSize)
+        return context.makeImage()
     }
 
-    /// Dibuja en un contexto con origen arriba-izquierda, en unidades del lienzo de salida.
+    /// Draws into a context with a top-left origin, in output canvas units.
     func draw(
         document: EditorDocument,
         layout: RenderLayout,
@@ -172,6 +176,20 @@ struct AnnotationRenderer {
     // MARK: - Private
 
     private func drawBackground(_ background: BackgroundSettings, size: CGSize, in context: CGContext) {
+        if let original = background.wallpaper {
+            // Downscaled (and blurred) version at the canvas's actual pixel size, cached across redraws.
+            let unitScale = hypot(context.ctm.a, context.ctm.b)
+            let pixelSize = CGSize(width: size.width * unitScale, height: size.height * unitScale)
+            let wallpaper = WallpaperBlur.image(original, radius: background.wallpaperBlur, covering: pixelSize)
+            let canvas = CGRect(origin: .zero, size: size)
+            context.saveGState()
+            context.clip(to: canvas)
+            context.interpolationQuality = .high
+            drawUpright(wallpaper, in: .aspectFill(CGSize(width: wallpaper.width, height: wallpaper.height), in: canvas), context: context)
+            context.restoreGState()
+            return
+        }
+
         let colors = background.preset.colors.map { NSColor($0).cgColor } as CFArray
         guard let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB), colors: colors, locations: nil) else { return }
 
@@ -342,7 +360,7 @@ struct AnnotationRenderer {
         NSGraphicsContext.restoreGraphicsState()
     }
 
-    /// Dibuja una imagen derecha en un contexto con el eje Y hacia abajo.
+    /// Draws an image upright in a context whose Y axis points down.
     private func drawUpright(_ image: CGImage, in rect: CGRect, context: CGContext) {
         context.saveGState()
         context.translateBy(x: rect.minX, y: rect.maxY)
@@ -374,12 +392,12 @@ struct AnnotationRenderer {
     }
 }
 
-extension Color {
+nonisolated extension Color {
     var cgColorValue: CGColor {
         (NSColor(self).usingColorSpace(.sRGB) ?? .black).cgColor
     }
 
-    /// Blanco o negro, el que mejor se lea sobre este color.
+    /// White or black, whichever reads better on this color.
     var contrastingTextColor: NSColor {
         guard let rgb = NSColor(self).usingColorSpace(.sRGB) else { return .white }
         let luminance = 0.299 * rgb.redComponent + 0.587 * rgb.greenComponent + 0.114 * rgb.blueComponent
@@ -387,8 +405,8 @@ extension Color {
     }
 }
 
-extension CGColorSpace {
-    /// Espacio de color valido para un contexto RGBA; si la imagen no es RGB se usa sRGB.
+nonisolated extension CGColorSpace {
+    /// Valid color space for an RGBA context; sRGB is used if the image isn't RGB.
     static func renderable(for image: CGImage) -> CGColorSpace {
         if let space = image.colorSpace, space.model == .rgb {
             return space

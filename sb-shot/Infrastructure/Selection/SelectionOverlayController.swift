@@ -1,12 +1,12 @@
 import AppKit
 
-/// Ventana de otra app que se puede elegir en modo ventana. `frame` en coordenadas globales de AppKit.
+/// Another app's window that can be picked in window mode. `frame` is in AppKit global coordinates.
 struct OverlayWindowInfo {
     let id: CGWindowID
     let frame: CGRect
     let ownerName: String?
 
-    /// Ventanas visibles de otras apps, ordenadas de la mas cercana al fondo.
+    /// Visible windows of other apps, ordered from front to back.
     static func onScreenWindows() -> [OverlayWindowInfo] {
         guard
             let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
@@ -34,13 +34,13 @@ struct OverlayWindowInfo {
     }
 }
 
-/// Estado compartido por las ventanas del overlay (una por pantalla).
+/// State shared by the overlay windows (one per display).
 final class SelectionSession {
     let options: SelectionOptions
     let windows: [OverlayWindowInfo]
 
-    /// Solo ventanas (accion "Capturar ventana"). Si no, el modo es inteligente:
-    /// arrastrar selecciona un area, clic elige la ventana o la pantalla bajo el cursor.
+    /// Windows only ("Capture Window" action). Otherwise the mode is smart:
+    /// dragging selects an area, clicking picks the window or display under the cursor.
     let isWindowOnly: Bool
     var mouseLocation = NSEvent.mouseLocation
     var dragStart: CGPoint?
@@ -59,7 +59,7 @@ final class SelectionSession {
         dragStart != nil
     }
 
-    /// Hay un area en curso (el arrastre ya supero el umbral de un clic).
+    /// An area is in progress (the drag has already exceeded the click threshold).
     var isSelectingArea: Bool {
         guard !isWindowOnly, let rect = selectionRect else { return false }
         return rect.width > 4 || rect.height > 4
@@ -69,7 +69,7 @@ final class SelectionSession {
         windows.first { $0.frame.contains(mouseLocation) }
     }
 
-    /// Lo que se elegiria con un clic: la ventana bajo el cursor o, en el escritorio, la pantalla completa.
+    /// What a click would pick: the window under the cursor or, on the desktop, the full display.
     var clickTarget: ScreenSelection? {
         guard options.allowsWindowMode else { return nil }
         if let window = hoveredWindow {
@@ -82,7 +82,7 @@ final class SelectionSession {
         return .display(id: displayID, frame: screen.frame)
     }
 
-    /// Rectangulo seleccionado en coordenadas globales, limitado a la pantalla donde empezo el arrastre.
+    /// Selected rectangle in global coordinates, clamped to the display where the drag started.
     var selectionRect: CGRect? {
         guard let dragStart, let dragCurrent else { return nil }
 
@@ -105,16 +105,16 @@ final class SelectionSession {
     var hint: String {
         let prefix = switch options.purpose {
         case .screenshot: ""
-        case .recording: "Grabar  ·  "
-        case .text: "Reconocer texto  ·  "
+        case .recording: String(localized: "Record") + "  ·  "
+        case .text: String(localized: "Recognize Text") + "  ·  "
         }
         if isWindowOnly {
-            return "\(prefix)Clic en una ventana  ·  Enter: pantalla completa  ·  Esc: cancelar"
+            return prefix + String(localized: "Click a window  ·  Enter: fullscreen  ·  Esc: cancel")
         }
         if options.allowsWindowMode {
-            return "\(prefix)Arrastra: área  ·  Clic: ventana  ·  Clic en el escritorio o Enter: pantalla completa  ·  Esc: cancelar"
+            return prefix + String(localized: "Drag: area  ·  Click: window  ·  Click the desktop or Enter: fullscreen  ·  Esc: cancel")
         }
-        return "\(prefix)Arrastra para seleccionar  ·  Enter: pantalla completa  ·  Esc: cancelar"
+        return prefix + String(localized: "Drag to select  ·  Enter: fullscreen  ·  Esc: cancel")
     }
 }
 
@@ -125,6 +125,10 @@ final class SelectionOverlayController: NSObject {
     private var session: SelectionSession?
     private var snapshots: [CGDirectDisplayID: CGImage] = [:]
     private var completion: ((SelectionResult?) -> Void)?
+    /// App that had focus before the overlay; focus is returned to it when done.
+    private var previousApp: NSRunningApplication?
+    /// Regions (global coordinates) drawn in the last refresh, so the display being left is repainted too.
+    private var lastDirtyRects: [CGRect] = []
 
     func beginSelection(
         options: SelectionOptions,
@@ -146,7 +150,7 @@ final class SelectionOverlayController: NSObject {
 
         installMonitors()
 
-        NSApp.activate(ignoringOtherApps: true)
+        previousApp = AppFocus.activate()
         let keyScreen = ScreenGeometry.screenUnderCursor
         for window in windows {
             if window.screenFrame == keyScreen?.frame {
@@ -229,8 +233,21 @@ final class SelectionOverlayController: NSObject {
         }
     }
 
+    /// Repaints only the displays affected by the current or previous state (cursor, selection, click target).
     private func refreshAll() {
-        for view in overlayViews {
+        guard let session else { return }
+
+        var dirty = [CGRect(x: session.mouseLocation.x - 1, y: session.mouseLocation.y - 1, width: 2, height: 2)]
+        if session.isDragging, let dragScreenFrame = session.dragScreenFrame {
+            dirty.append(dragScreenFrame)
+        }
+        if !session.isSelectingArea, let target = session.clickTarget {
+            dirty.append(target.frame)
+        }
+
+        let affected = dirty + lastDirtyRects
+        lastDirtyRects = dirty
+        for view in overlayViews where affected.contains(where: { $0.intersects(view.screenFrame) }) {
             view.needsDisplay = true
         }
     }
@@ -259,7 +276,10 @@ final class SelectionOverlayController: NSObject {
         }
         windows.removeAll()
         overlayViews.removeAll()
+        lastDirtyRects.removeAll()
         NSCursor.arrow.set()
+        AppFocus.restore(previousApp)
+        previousApp = nil
 
         guard let selection else {
             completion(nil)
@@ -322,7 +342,7 @@ private final class SelectionOverlayView: NSView {
     var onFinish: ((ScreenSelection) -> Void)?
     var onCancel: (() -> Void)?
 
-    private let screenFrame: CGRect
+    let screenFrame: CGRect
     private let snapshot: CGImage?
     private let session: SelectionSession
 
@@ -409,7 +429,7 @@ private final class SelectionOverlayView: NSView {
         if let rect, rect.width >= 5, rect.height >= 5 {
             onFinish?(.area(rect))
         } else if let target = session.clickTarget {
-            // Un clic sin arrastrar elige la ventana o la pantalla bajo el cursor.
+            // A click without dragging picks the window or display under the cursor.
             onFinish?(target)
         } else {
             onChange?()
@@ -475,7 +495,7 @@ private final class SelectionOverlayView: NSView {
         drawDimensionLabel("\(Int(rect.width)) × \(Int(rect.height))", below: selection, in: context)
     }
 
-    /// Resalta lo que se elegiria con un clic: el resto queda oscurecido y el objetivo con borde de acento.
+    /// Highlights what a click would pick: the rest is dimmed and the target gets an accent border.
     private func drawClickTarget(_ target: ScreenSelection, in context: CGContext) {
         let frame = toLocal(target.frame).intersection(bounds)
         let isOnThisScreen = !frame.isNull && !frame.isEmpty
@@ -500,10 +520,10 @@ private final class SelectionOverlayView: NSView {
         let label: String
         switch target {
         case .window:
-            let name = session.hoveredWindow?.ownerName.map { "\($0)  ·  " } ?? "Ventana  ·  "
+            let name = session.hoveredWindow?.ownerName.map { "\($0)  ·  " } ?? String(localized: "Window") + "  ·  "
             label = "\(name)\(Int(target.frame.width)) × \(Int(target.frame.height))"
         case .display, .area:
-            label = "Pantalla completa  ·  \(Int(target.frame.width)) × \(Int(target.frame.height))"
+            label = String(localized: "Fullscreen") + "  ·  \(Int(target.frame.width)) × \(Int(target.frame.height))"
         }
         drawPill(label, centeredAt: CGPoint(x: frame.midX, y: frame.midY), in: context, fontSize: 13)
     }

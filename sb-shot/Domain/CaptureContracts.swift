@@ -8,15 +8,31 @@ enum CaptureOutcome {
 }
 
 protocol ScreenCaptureProviding {
-    /// Captura cada pantalla completa (sin las ventanas de la app) para la lupa y el modo congelado.
+    /// Captures each full display (without the app's windows) for the magnifier and frozen mode.
     func displaySnapshots() async throws -> [CGDirectDisplayID: CGImage]
+    /// Same as `displaySnapshots()`, but can hide the desktop icons (frozen mode).
+    func displaySnapshots(hidingDesktopIcons: Bool) async throws -> [CGDirectDisplayID: CGImage]
     func capture(_ selection: ScreenSelection, options: CaptureOptions) async throws -> NSImage
+}
+
+extension ScreenCaptureProviding {
+    func displaySnapshots(hidingDesktopIcons _: Bool) async throws -> [CGDirectDisplayID: CGImage] {
+        try await displaySnapshots()
+    }
 }
 
 protocol ScreenPermissionChecking {
     func hasScreenRecordingAccess() -> Bool
     func requestScreenRecordingAccess() -> Bool
     func openScreenRecordingSettings()
+    /// `true` if the system prompt was already shown before; the first time, Settings is not opened.
+    func hasRequestedScreenRecordingAccess() -> Bool
+}
+
+extension ScreenPermissionChecking {
+    func hasRequestedScreenRecordingAccess() -> Bool {
+        true
+    }
 }
 
 protocol ClipboardWriting {
@@ -27,18 +43,18 @@ protocol ClipboardWriting {
 
 protocol RegionSelecting {
     func select(options: SelectionOptions) async -> SelectionResult?
-    /// Pantalla bajo el cursor, para capturas o grabaciones de pantalla completa.
+    /// Display under the cursor, for fullscreen captures or recordings.
     func displayUnderCursor() -> ScreenSelection?
 }
 
 protocol CountdownPresenting: AnyObject {
-    /// Muestra una cuenta regresiva sobre la seleccion. Devuelve `false` si el usuario la cancela.
+    /// Shows a countdown over the selection. Returns `false` if the user cancels it.
     func countdown(seconds: Int, over selection: ScreenSelection) async -> Bool
 }
 
 protocol ScreenRecording: AnyObject {
     var onUnexpectedStop: ((Error?) -> Void)? { get set }
-    /// Graba sin ninguna ventana de la app, salvo `visibleOwnWindowNumbers` (por ejemplo, el resaltado de clics).
+    /// Records without any of the app's windows, except `visibleOwnWindowNumbers` (for example, the click highlight).
     func start(_ selection: ScreenSelection, options: RecordingOptions, visibleOwnWindowNumbers: [Int]) async throws
     func stop() async throws -> URL
     func cancel() async

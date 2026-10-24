@@ -38,7 +38,7 @@ private final class HistoryWindowController: NSWindowController, NSWindowDelegat
             backing: .buffered,
             defer: false
         )
-        window.title = "Historial de capturas"
+        window.title = String(localized: "Capture History")
         window.minSize = NSSize(width: 520, height: 360)
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
@@ -79,9 +79,9 @@ private struct HistoryView: View {
         Group {
             if store.entries.isEmpty {
                 ContentUnavailableView(
-                    "Sin capturas todavía",
+                    "No Captures Yet",
                     systemImage: "photo.on.rectangle.angled",
-                    description: Text("Tus capturas y grabaciones aparecerán aquí.")
+                    description: Text("Your screenshots and recordings will appear here.")
                 )
             } else {
                 ScrollView {
@@ -105,15 +105,15 @@ private struct HistoryView: View {
                 Button(role: .destructive) {
                     confirmClear = true
                 } label: {
-                    Label("Borrar historial", systemImage: "trash")
+                    Label("Clear History", systemImage: "trash")
                 }
                 .disabled(store.entries.isEmpty)
             }
         }
-        .confirmationDialog("¿Borrar todo el historial?", isPresented: $confirmClear) {
-            Button("Borrar todo", role: .destructive) { store.clear() }
+        .confirmationDialog("Clear the entire history?", isPresented: $confirmClear) {
+            Button("Clear All", role: .destructive) { store.clear() }
         } message: {
-            Text("Se eliminarán las copias guardadas en el historial. Los archivos que guardaste en tu carpeta no se tocan.")
+            Text("The copies kept in the history will be deleted. Files you saved to your folder are not affected.")
         }
     }
 }
@@ -147,10 +147,10 @@ private struct HistoryCell: View {
 
                 if isHovering {
                     HStack(spacing: 6) {
-                        cellButton("doc.on.doc", help: "Copiar") { actions.copy(entry, url) }
-                        cellButton(entry.kind == .image ? "pencil" : "play.fill", help: "Abrir") { actions.open(entry, url) }
-                        cellButton("folder", help: "Mostrar en Finder") { actions.reveal(url) }
-                        cellButton("trash", help: "Eliminar", action: onDelete)
+                        cellButton("doc.on.doc", help: "Copy") { actions.copy(entry, url) }
+                        cellButton(entry.kind == .image ? "pencil" : "play.fill", help: "Open") { actions.open(entry, url) }
+                        cellButton("folder", help: "Show in Finder") { actions.reveal(url) }
+                        cellButton("trash", help: "Delete", action: onDelete)
                     }
                     .padding(6)
                     .background(.ultraThinMaterial, in: Capsule())
@@ -183,7 +183,7 @@ private struct HistoryCell: View {
         }
     }
 
-    private func cellButton(_ systemName: String, help: String, action: @escaping () -> Void) -> some View {
+    private func cellButton(_ systemName: String, help: LocalizedStringKey, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 11, weight: .semibold))

@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Superficie que se puede arrastrar para soltar un archivo en otras apps, y que tambien responde a clics
-/// y al deslizamiento horizontal (para descartar).
+/// Draggable surface for dropping a file into other apps, which also responds to clicks
+/// and horizontal swipes (to dismiss).
 struct FileDragSource: NSViewRepresentable {
     let fileURL: () -> URL?
     let previewImage: NSImage?
@@ -31,7 +31,7 @@ struct FileDragSource: NSViewRepresentable {
     }
 }
 
-/// Hosting view para paneles flotantes que no activan la app: el primer clic ya pulsa el boton.
+/// Hosting view for floating panels that don't activate the app: the first click already presses the button.
 final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for _: NSEvent?) -> Bool {
         true

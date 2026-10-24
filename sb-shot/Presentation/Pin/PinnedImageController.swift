@@ -3,12 +3,20 @@ import Combine
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Mantiene capturas flotando sobre todas las ventanas.
+/// Keeps screenshots floating above all windows.
 final class PinnedImagePresenter: PinPresenting {
+    private let toast: ToastPresenting
     private var controllers: [PinnedImageController] = []
+
+    init(toast: ToastPresenting) {
+        self.toast = toast
+    }
 
     func pin(image: NSImage, onEdit: @escaping (NSImage) -> Void, onCopy: @escaping (NSImage) -> Void) {
         let controller = PinnedImageController(image: image, onEdit: onEdit, onCopy: onCopy)
+        controller.onSaveFailed = { [weak self] in
+            self?.toast.show(String(localized: "Couldn’t save the image"), systemImage: "exclamationmark.triangle")
+        }
         controller.onClose = { [weak self, weak controller] in
             self?.controllers.removeAll { $0 === controller }
         }
@@ -19,6 +27,7 @@ final class PinnedImagePresenter: PinPresenting {
 
 private final class PinnedImageController: NSObject, NSWindowDelegate {
     var onClose: (() -> Void)?
+    var onSaveFailed: (() -> Void)?
 
     private let image: NSImage
     private let panel: PinPanel
@@ -107,15 +116,22 @@ private final class PinnedImageController: NSObject, NSWindowDelegate {
     private func save() {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
-        panel.nameFieldStringValue = "captura-fijada.png"
+        panel.nameFieldStringValue = "pinned-screenshot.png"
         NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
         guard
-            panel.runModal() == .OK,
-            let url = panel.url,
             let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
             let data = NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
-        else { return }
-        try? data.write(to: url)
+        else {
+            onSaveFailed?()
+            return
+        }
+        // Atomic write: if it fails, the file already at the destination stays intact.
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            onSaveFailed?()
+        }
     }
 }
 
@@ -131,7 +147,7 @@ private final class PinPanel: NSPanel {
     }
 }
 
-/// Recibe la rueda del raton y el gesto de pellizco para cambiar el tamano de la captura fijada.
+/// Receives the mouse wheel and pinch gesture to resize the pinned screenshot.
 private final class ZoomContainerView: NSView {
     var onZoom: ((CGFloat) -> Void)?
 
@@ -212,16 +228,16 @@ private struct PinView: View {
             withAnimation(.easeInOut(duration: 0.12)) { isHovering = hovering }
         }
         .contextMenu {
-            Button("Copiar", action: onCopy)
-            Button("Guardar…", action: onSave)
-            Button("Anotar", action: onEdit)
-            Menu("Opacidad") {
+            Button("Copy", action: onCopy)
+            Button("Save…", action: onSave)
+            Button("Annotate", action: onEdit)
+            Menu("Opacity") {
                 ForEach([1.0, 0.75, 0.5, 0.25], id: \.self) { value in
                     Button("\(Int(value * 100))%") { model.opacity = value }
                 }
             }
             Divider()
-            Button("Cerrar", action: onClose)
+            Button("Close", action: onClose)
         }
     }
 }

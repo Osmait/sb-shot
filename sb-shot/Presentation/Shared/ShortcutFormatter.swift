@@ -12,7 +12,7 @@ enum ShortcutFormatter {
         45: "N", 46: "M", 47: ".", 50: "`",
         122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6",
         98: "F7", 100: "F8", 101: "F9", 109: "F10", 103: "F11", 111: "F12",
-        49: "Espacio", 36: "↩", 48: "⇥", 51: "⌫", 123: "←", 124: "→", 125: "↓", 126: "↑",
+        49: String(localized: "Space"), 36: "↩", 48: "⇥", 51: "⌫", 123: "←", 124: "→", 125: "↓", 126: "↑",
     ]
 
     static func display(_ shortcut: GlobalShortcut) -> String {
@@ -34,10 +34,10 @@ enum ShortcutFormatter {
     }
 
     static func keyName(for keyCode: UInt32) -> String {
-        keyCodeNames[keyCode] ?? "Tecla \(keyCode)"
+        keyCodeNames[keyCode] ?? String(localized: "Key \(Int(keyCode))")
     }
 
-    /// Equivalente para mostrar el atajo en los menus de SwiftUI.
+    /// Equivalent used to show the shortcut in SwiftUI menus.
     static func keyboardShortcut(for shortcut: GlobalShortcut?) -> KeyboardShortcut? {
         guard
             let shortcut,

@@ -30,5 +30,8 @@ struct SbShotApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        #if DEBUG
+        DemoMode.startIfRequested()
+        #endif
     }
 }

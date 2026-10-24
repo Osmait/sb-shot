@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Pila de miniaturas flotantes que aparece despues de cada captura o grabacion.
+/// Stack of floating thumbnails shown after each screenshot or recording.
 final class QuickAccessController: QuickAccessPresenting {
     private let settings: AppSettings
     private var cards: [QuickAccessCard] = []
@@ -104,6 +104,7 @@ private final class QuickAccessCard {
 
     func configure(actions: QuickAccessActions) {
         let wrapped = QuickAccessCardView.Actions(
+            fileURL: actions.fileURL,
             copy: actions.onCopy,
             save: actions.onSave,
             edit: { [weak self] in
@@ -186,6 +187,7 @@ private final class QuickAccessCard {
 
 private struct QuickAccessCardView: View {
     struct Actions {
+        let fileURL: () -> URL
         let copy: () -> Void
         let save: () -> Void
         let edit: () -> Void
@@ -212,7 +214,7 @@ private struct QuickAccessCardView: View {
                 .clipped()
 
             FileDragSource(
-                fileURL: { item.fileURL },
+                fileURL: { actions?.fileURL() ?? item.fileURL },
                 previewImage: item.thumbnail,
                 onClick: { actions?.edit() },
                 onDragEnded: { actions?.dragEnded($0) },
@@ -255,18 +257,18 @@ private struct QuickAccessCardView: View {
                 .allowsHitTesting(false)
 
             VStack(spacing: 8) {
-                pillButton("Copiar", action: { actions?.copy() })
-                pillButton("Guardar", action: { actions?.save() })
+                pillButton("Copy", action: { actions?.copy() })
+                pillButton("Save", action: { actions?.save() })
             }
 
             VStack {
                 HStack {
-                    circleButton("xmark", help: "Cerrar") { actions?.close() }
+                    circleButton("xmark", help: "Close") { actions?.close() }
                     Spacer()
                     if let pin = actions?.pin {
-                        circleButton("pin", help: "Fijar en pantalla", action: pin)
+                        circleButton("pin", help: "Pin to Screen", action: pin)
                     }
-                    circleButton(item.isImage ? "pencil" : "scissors", help: item.isImage ? "Anotar" : "Recortar video") {
+                    circleButton(item.isImage ? "pencil" : "scissors", help: item.isImage ? "Annotate" : "Trim Video") {
                         actions?.edit()
                     }
                 }
@@ -301,12 +303,12 @@ private struct QuickAccessCardView: View {
 
     private var badgeText: String {
         guard item.videoURL != nil else { return "GIF" }
-        guard let duration else { return "Video" }
+        guard let duration else { return String(localized: "Video") }
         let seconds = Int(duration.rounded())
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 
-    private func pillButton(_ title: String, action: @escaping () -> Void) -> some View {
+    private func pillButton(_ title: LocalizedStringKey, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
@@ -318,7 +320,7 @@ private struct QuickAccessCardView: View {
         .buttonStyle(.plain)
     }
 
-    private func circleButton(_ systemName: String, help: String, action: @escaping () -> Void) -> some View {
+    private func circleButton(_ systemName: String, help: LocalizedStringKey, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 11, weight: .bold))

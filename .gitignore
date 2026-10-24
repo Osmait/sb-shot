@@ -30,3 +30,6 @@ fastlane/test_output/
 
 # Logs
 *.log
+
+# Test results
+*.xcresult

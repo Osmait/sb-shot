@@ -2,8 +2,8 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// Barra flotante con el tiempo y los controles de la grabacion, mas un borde alrededor del area grabada.
-/// Ninguna de las dos ventanas aparece en el video.
+/// Floating bar with the recording time and controls, plus a border around the recorded area.
+/// Neither window appears in the video.
 final class RecordingControlsController: RecordingControlsPresenting {
     private final class Model: ObservableObject {
         @Published var elapsed: TimeInterval = 0
@@ -118,7 +118,7 @@ final class RecordingControlsController: RecordingControlsPresenting {
                     .overlay(Color.white.opacity(0.2))
 
                 Button(action: onStop) {
-                    Label("Detener", systemImage: "stop.fill")
+                    Label("Stop", systemImage: "stop.fill")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 10)
@@ -126,10 +126,10 @@ final class RecordingControlsController: RecordingControlsPresenting {
                         .background(Color.red.opacity(0.85), in: Capsule())
                 }
                 .buttonStyle(.plain)
-                .help("Detener y guardar")
+                .help("Stop and save")
 
-                iconButton("arrow.counterclockwise", help: "Reiniciar grabación", action: onRestart)
-                iconButton("trash", help: "Descartar grabación", action: onCancel)
+                iconButton("arrow.counterclockwise", help: "Restart recording", action: onRestart)
+                iconButton("trash", help: "Discard recording", action: onCancel)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
@@ -141,7 +141,7 @@ final class RecordingControlsController: RecordingControlsPresenting {
             .onAppear { pulse = true }
         }
 
-        private func iconButton(_ systemName: String, help: String, action: @escaping () -> Void) -> some View {
+        private func iconButton(_ systemName: String, help: LocalizedStringKey, action: @escaping () -> Void) -> some View {
             Button(action: action) {
                 Image(systemName: systemName)
                     .font(.system(size: 12, weight: .semibold))

@@ -3,9 +3,16 @@ import Foundation
 
 @MainActor
 final class AppContainer {
+    #if DEBUG
+    // Demo mode never reads or writes the user's real settings, files or history.
+    let settings = AppSettings(defaults: DemoMode.defaults ?? .standard)
+    let fileStorage = FileStorage(defaults: DemoMode.defaults ?? .standard, temporaryDirectory: DemoMode.directory("files"))
+    let history = HistoryStore(directory: DemoMode.directory("container-history"))
+    #else
     let settings = AppSettings()
     let fileStorage = FileStorage()
     let history = HistoryStore()
+    #endif
 
     private let permissionService = PermissionService()
     private let clipboardService = ClipboardService()
@@ -33,7 +40,7 @@ final class AppContainer {
         quickAccess: QuickAccessController(settings: settings),
         editor: EditorWindowPresenter(),
         videoEditor: VideoEditorWindowPresenter(),
-        pins: PinnedImagePresenter(),
+        pins: PinnedImagePresenter(toast: toast),
         toast: toast
     )
 
@@ -68,6 +75,21 @@ final class AppContainer {
     )
 
     init() {
+        #if DEBUG
+        // Demo mode stages its own windows: no hotkeys and no cleanup of real files.
+        if DemoMode.isActive {
+            return
+        }
+        #endif
+        fileStorage.onSaveFolderUnavailable = { [weak self] in
+            // Deferred: this can happen during launch, before the app can show windows.
+            Task { @MainActor in
+                self?.toast.show(String(localized: "The save folder is no longer available; using the default folder"), systemImage: "folder.badge.questionmark")
+            }
+        }
+        // Resolve the folder at launch to warn right away if it no longer exists.
+        _ = fileStorage.saveFolder
+        fileStorage.removeStaleTemporaryFiles()
         bindHotkeys()
     }
 
@@ -99,6 +121,12 @@ final class AppContainer {
     }
 
     private func registerHotkeys() {
-        hotkeyManager.register(settings.recordingShortcutFor == nil ? settings.activeShortcuts : [:])
+        let isRecordingShortcut = settings.recordingShortcutFor != nil
+        hotkeyManager.register(isRecordingShortcut ? [:] : settings.activeShortcuts)
+
+        // While a shortcut is being recorded all of them are disabled on purpose; keep the previous state.
+        // Only publish on change, because every change calls this method again.
+        guard !isRecordingShortcut, settings.unavailableShortcuts != hotkeyManager.failedActions else { return }
+        settings.unavailableShortcuts = hotkeyManager.failedActions
     }
 }

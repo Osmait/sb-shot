@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Lienzo del editor. Dibuja el documento con el mismo renderer que la exportacion y traduce el raton
-/// a coordenadas de la imagen.
+/// Editor canvas. Draws the document with the same renderer as the export and converts mouse input
+/// to image coordinates.
 struct EditorCanvasView: View {
     @ObservedObject var viewModel: CaptureEditorViewModel
 
@@ -49,20 +49,28 @@ struct EditorCanvasView: View {
     private func drawDocument(in context: GraphicsContext, layout: RenderLayout, transform: CanvasTransform) {
         guard let sources = viewModel.previewSources else { return }
 
-        var shadowContext = context
-        shadowContext.addFilter(.shadow(color: .black.opacity(layout.background == nil ? 0.45 : 0), radius: 18, y: 4))
-        shadowContext.fill(Path(transform.toView(CGRect(origin: .zero, size: layout.outputSize))), with: .color(.black))
+        let document = viewModel.displayDocument
+        let excludedID = viewModel.editingTextID
+        let renderer = viewModel.renderer
+        let drawContent = { (target: GraphicsContext) in
+            target.withCGContext { cgContext in
+                cgContext.translateBy(x: transform.origin.x, y: transform.origin.y)
+                cgContext.scaleBy(x: transform.scale, y: transform.scale)
+                renderer.draw(document: document, layout: layout, sources: sources, in: cgContext, excludingAnnotationID: excludedID)
+            }
+        }
 
-        context.withCGContext { cgContext in
-            cgContext.translateBy(x: transform.origin.x, y: transform.origin.y)
-            cgContext.scaleBy(x: transform.scale, y: transform.scale)
-            viewModel.renderer.draw(
-                document: viewModel.displayDocument,
-                layout: layout,
-                sources: sources,
-                in: cgContext,
-                excludingAnnotationID: viewModel.editingTextID
-            )
+        guard layout.background == nil else {
+            drawContent(context)
+            return
+        }
+
+        // Without a background the shadow comes from the content's alpha, so transparent areas (a window's shadow,
+        // rounded corners) look like in the exported image instead of sitting on a black rectangle.
+        var shadowContext = context
+        shadowContext.addFilter(.shadow(color: .black.opacity(0.45), radius: 18, y: 4))
+        shadowContext.drawLayer { layer in
+            drawContent(layer)
         }
     }
 
@@ -76,9 +84,9 @@ struct EditorCanvasView: View {
             let bounds = transform.toView(layout.toOutput(annotation.bounds)).insetBy(dx: -4, dy: -4)
             context.stroke(Path(roundedRect: bounds, cornerRadius: 3), with: .color(accent), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
         } else if case .line = annotation.kind {
-            // Las lineas solo muestran sus extremos.
+            // Lines only show their endpoints.
         } else if case .arrow = annotation.kind {
-            // Igual que las lineas.
+            // Same as lines.
         } else {
             let bounds = transform.toView(layout.toOutput(annotation.bounds))
             context.stroke(Path(bounds), with: .color(accent.opacity(0.8)), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
@@ -138,7 +146,7 @@ struct EditorCanvasView: View {
             let viewOrigin = transform.toView(layout.toOutput(origin))
             let padding = style.textBackground ? AnnotationMetrics.textPadding : .zero
 
-            TextField("Escribe aquí", text: $viewModel.textDraft, axis: .vertical)
+            TextField("Type here", text: $viewModel.textDraft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: style.fontSize * transform.scale, weight: .bold))
                 .foregroundStyle(style.textBackground ? Color(nsColor: style.color.contrastingTextColor) : style.color)
@@ -198,7 +206,7 @@ struct EditorCanvasView: View {
     }
 }
 
-/// Escala y desplazamiento del lienzo de salida dentro de la vista.
+/// Scale and offset of the output canvas within the view.
 struct CanvasTransform {
     let scale: CGFloat
     let origin: CGPoint

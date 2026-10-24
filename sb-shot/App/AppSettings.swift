@@ -1,7 +1,7 @@
 import AppKit
 import Combine
 
-/// Preferencia guardada en UserDefaults (como JSON) que notifica a la instancia de `AppSettings` que la contiene.
+/// Preference stored in UserDefaults (as JSON) that notifies the `AppSettings` instance containing it.
 @propertyWrapper
 struct Preference<Value: Codable> {
     let key: String
@@ -13,10 +13,10 @@ struct Preference<Value: Codable> {
         defaultValue = wrappedValue
     }
 
-    @available(*, unavailable, message: "Solo se puede usar dentro de AppSettings")
+    @available(*, unavailable, message: "Only usable inside AppSettings")
     var wrappedValue: Value {
-        get { fatalError("Preference solo funciona dentro de AppSettings") }
-        set { fatalError("Preference solo funciona dentro de AppSettings") } // swiftlint:disable:this unused_setter_value
+        get { fatalError("Preference only works inside AppSettings") }
+        set { fatalError("Preference only works inside AppSettings") } // swiftlint:disable:this unused_setter_value
     }
 
     static subscript(
@@ -47,8 +47,11 @@ struct Preference<Value: Codable> {
 final class AppSettings: ObservableObject {
     let defaults: UserDefaults
 
-    /// Mientras se graba un atajo en Ajustes se desactivan los atajos globales.
+    /// Global shortcuts are disabled while a shortcut is being recorded in Settings.
     @Published var recordingShortcutFor: CaptureAction?
+
+    /// Actions whose global shortcut could not be registered (in use by another app). Updated by `AppContainer`.
+    @Published var unavailableShortcuts: Set<CaptureAction> = []
 
     // MARK: General
 
@@ -61,7 +64,7 @@ final class AppSettings: ObservableObject {
     @Preference("general.filePrefix") var fileNamePrefix = "sb-shot"
     @Preference("general.keepHistory") var keepHistory = true
 
-    // MARK: Captura
+    // MARK: Capture
 
     @Preference("capture.freezeScreen") var freezeScreen = false
     @Preference("capture.showMagnifier") var showMagnifier = true
@@ -71,7 +74,7 @@ final class AppSettings: ObservableObject {
     @Preference("capture.downscaleRetina") var downscaleRetina = false
     @Preference("capture.lastArea") var lastCaptureArea: CGRect? = nil // swiftlint:disable:this implicit_optional_initialization
 
-    // MARK: Grabacion
+    // MARK: Recording
 
     @Preference("recording.format") var recordingFormat = RecordingFormat.mp4
     @Preference("recording.fps") var recordingFPS = 60
@@ -84,15 +87,15 @@ final class AppSettings: ObservableObject {
     @Preference("recording.gifFPS") var gifFPS = 15
     @Preference("recording.gifMaxWidth") var gifMaxWidth = 960.0
 
-    // MARK: Acceso rapido
+    // MARK: Quick Access
 
     @Preference("quickAccess.position") var quickAccessPosition = QuickAccessPosition.bottomRight
     @Preference("quickAccess.autoClose") var quickAccessAutoClose = 10
     @Preference("quickAccess.closeAfterDrag") var quickAccessClosesAfterDrag = true
 
-    // MARK: Atajos
+    // MARK: Shortcuts
 
-    /// Atajo por accion. Una entrada con `nil` significa que el usuario lo desactivo.
+    /// Shortcut per action. A `nil` entry means the user disabled it.
     @Preference("shortcuts") private var storedShortcuts: [String: GlobalShortcut?] = [:]
 
     init(defaults: UserDefaults = .standard) {
@@ -111,7 +114,7 @@ final class AppSettings: ObservableObject {
         var shortcuts = storedShortcuts
         shortcuts[action.rawValue] = .some(shortcut)
 
-        // Un atajo solo puede pertenecer a una accion.
+        // A shortcut can only belong to one action.
         if let shortcut {
             for other in CaptureAction.allCases where other != action && self.shortcut(for: other) == shortcut {
                 shortcuts[other.rawValue] = .some(nil)
