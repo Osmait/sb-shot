@@ -8,7 +8,8 @@ import UniformTypeIdentifiers
 /// writes a PNG and quits. Used to produce the README screenshots.
 ///
 /// Launch: `SbShot -SbShotDemo <scene> [-SbShotDemoOutput <dir>] [-SbShotDemoSettingsTab <tab>]`.
-/// Scenes: hero, editor, video-editor, quick-access, history, settings, pin.
+/// Scenes: hero, editor, video-editor, quick-access, history, settings, pin, and `animation`, which writes
+/// numbered PNG frames plus an ffmpeg concat list (`frames.txt`) to `<output>/animation/` instead of one PNG.
 /// The default output folder is `<container tmp>/sb-shot-demo-output`; the absolute path of the PNG is printed.
 /// Settings, files and history use isolated temporary stores: the user's data is never read or modified.
 @MainActor
@@ -21,6 +22,7 @@ enum DemoMode {
         case history
         case settings
         case pin
+        case animation
     }
 
     static let scene: Scene? = UserDefaults.standard.string(forKey: "SbShotDemo").flatMap(Scene.init(rawValue:))
@@ -67,7 +69,7 @@ enum DemoMode {
         guard let scene else { return }
 
         // Never hang: quit with an error if the scene doesn't finish.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 90) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + (scene == .animation ? 240 : 90)) {
             log("Timed out")
             exit(3)
         }
@@ -77,6 +79,12 @@ enum DemoMode {
                 if let wallpaper = DemoSamples.wallpaper() {
                     WallpaperProvider.shared.demoImage = wallpaper
                     await WallpaperProvider.shared.refresh()
+                }
+                if scene == .animation {
+                    let url = try await animation()
+                    log("Wrote \(url.path)")
+                    NSApp.terminate(nil)
+                    return
                 }
                 let image = try await run(scene)
                 let url = try write(image, name: scene.rawValue)
@@ -100,6 +108,170 @@ enum DemoMode {
         case .history: try await history()
         case .settings: try await settings()
         case .pin: try await pin()
+        case .animation: throw DemoError.render
+        }
+    }
+
+    // MARK: - Animation
+
+    /// Records the frames of a short demo: annotating a capture, adding a background, then trimming
+    /// a recording and giving it a background. Every frame is the staged window on the synthetic wallpaper.
+    private static func animation() async throws -> URL {
+        let recorder = try FrameRecorder(directory: outputDirectory.appendingPathComponent("animation", isDirectory: true))
+        let windowSize = CGSize(width: 1200, height: 760)
+        let margins = NSEdgeInsets(top: 40, left: 40, bottom: 40, right: 40)
+
+        // Screenshot editor.
+        let editor = CaptureEditorWindowController(image: DemoSamples.dashboard(), actions: EditorActions(
+            onCopy: { _ in }, onSave: { _ in }, onSaveAs: { _ in }, onPin: { _ in }
+        ))
+        retained.append(editor)
+        editor.show()
+        let editorWindow = try require(editor.window)
+        ignoreMouse(editorWindow)
+        place(editorWindow, size: windowSize)
+        let model = editor.demoViewModel
+
+        let (full, _) = DemoSamples.annotatedDocument()
+        var document = EditorDocument()
+        model.loadDemoDocument(document, selecting: nil)
+        try await settle(1.5)
+
+        func frame(_ hold: Double, wait: Double = 0.08) async throws {
+            try await settle(wait)
+            try recorder.add(await captureOnWallpaper([editorWindow], margins: margins), hold: hold)
+        }
+        try await frame(0.9)
+
+        // Draws each annotation in the order a person would: shapes grow, the rest appear.
+        let order: [Int] = [3, 1, 2, 4, 5, 6, 0]
+        for index in order {
+            let annotation = full.annotations[index]
+            let steps = growthSteps(annotation)
+            for (step, partial) in steps.enumerated() {
+                var draft = document
+                draft.annotations.append(partial)
+                model.loadDemoDocument(draft, selecting: partial.id)
+                try await frame(step == steps.count - 1 ? 0.45 : 0.045)
+            }
+            document.annotations.append(annotation)
+        }
+
+        // Background: turn it on with the padding growing, then try two other styles.
+        model.loadDemoDocument(document, selecting: nil)
+        try await frame(0.4)
+        for step in 1 ... 8 {
+            var background = heroBackground
+            background.padding = 56 * CGFloat(step) / 8
+            document.background = background
+            model.loadDemoDocument(document, selecting: nil)
+            try await frame(step == 8 ? 0.9 : 0.05)
+        }
+        for preset in [2, 4, 0] {
+            document.background.presetIndex = preset
+            model.loadDemoDocument(document, selecting: nil)
+            try await frame(preset == 0 ? 1.4 : 0.75)
+        }
+        editorWindow.orderOut(nil)
+
+        // Video editor.
+        let videoURL = workDirectory.appendingPathComponent("demo-recording.mp4")
+        try await DemoSamples.writeVideo(to: videoURL)
+        let video = VideoEditorWindowController(videoURL: videoURL, actions: VideoEditorActions(
+            onCopy: { _ in }, onSave: { _ in }, defaultFormat: .mp4, gifFramesPerSecond: 15
+        ))
+        retained.append(video)
+        video.show()
+        let videoWindow = try require(video.window)
+        ignoreMouse(videoWindow)
+        place(videoWindow, size: windowSize)
+        let videoModel = video.demoModel
+        try await settle(1.5)
+        videoModel.seek(to: 1.2)
+
+        func videoFrame(_ hold: Double, wait: Double = 0.1) async throws {
+            try await settle(wait)
+            try recorder.add(await captureOnWallpaper([videoWindow], margins: margins), hold: hold)
+        }
+        try await videoFrame(0.8, wait: 0.6)
+
+        for step in 1 ... 6 {
+            videoModel.setTrimStart(0.9 * Double(step) / 6)
+            try await videoFrame(0.06)
+        }
+        for step in 1 ... 6 {
+            videoModel.setTrimEnd(5 - 0.9 * Double(step) / 6)
+            try await videoFrame(step == 6 ? 0.5 : 0.06)
+        }
+        videoModel.seek(to: 2.4)
+        for (index, preset) in [1, 3].enumerated() {
+            videoModel.updateBackground {
+                $0.isEnabled = true
+                $0.presetIndex = preset
+                $0.padding = 64
+                $0.cornerRadius = 14
+            }
+            // Waits for the playback composition with the new background.
+            try await videoFrame(index == 0 ? 1.0 : 1.6, wait: 1.2)
+        }
+
+        return try recorder.finish()
+    }
+
+    /// Intermediate states of an annotation as it is drawn: arrows, lines and rectangles grow; the rest appear at once.
+    private static func growthSteps(_ annotation: EditorAnnotation) -> [EditorAnnotation] {
+        let count = 7
+        func scaled(_ fraction: CGFloat) -> EditorAnnotation {
+            var copy = annotation
+            switch annotation.kind {
+            case let .arrow(start, end):
+                copy.kind = .arrow(start: start, end: CGPoint(x: start.x + (end.x - start.x) * fraction, y: start.y + (end.y - start.y) * fraction))
+            case let .line(start, end):
+                copy.kind = .line(start: start, end: CGPoint(x: start.x + (end.x - start.x) * fraction, y: start.y + (end.y - start.y) * fraction))
+            case let .rectangle(rect):
+                copy.kind = .rectangle(CGRect(x: rect.minX, y: rect.minY, width: rect.width * fraction, height: rect.height * fraction))
+            case let .obfuscate(rect):
+                copy.kind = .obfuscate(CGRect(x: rect.minX, y: rect.minY, width: rect.width * fraction, height: rect.height))
+            default:
+                return annotation
+            }
+            return copy
+        }
+        switch annotation.kind {
+        case .arrow, .line, .rectangle, .obfuscate:
+            return (1 ... count).map { scaled(CGFloat($0) / CGFloat(count)) }
+        default:
+            return [annotation]
+        }
+    }
+
+    /// Writes numbered PNG frames and an ffmpeg concat list with how long each one is shown.
+    private final class FrameRecorder {
+        private let directory: URL
+        private var names: [String] = []
+        private var holds: [Double] = []
+
+        init(directory: URL) throws {
+            self.directory = directory
+            try? FileManager.default.removeItem(at: directory)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+
+        func add(_ image: CGImage, hold: Double) throws {
+            let name = String(format: "frame-%04d.png", names.count + 1)
+            try writeCGImage(downscaled(image, maxWidth: 1600), to: directory.appendingPathComponent(name), type: .png)
+            names.append(name)
+            holds.append(hold)
+        }
+
+        func finish() throws -> URL {
+            guard let last = names.last else { throw DemoError.render }
+            var list = zip(names, holds).map { "file '\($0)'\nduration \(String(format: "%.3f", $1))" }
+            // The concat demuxer ignores the last duration unless the last file is listed again.
+            list.append("file '\(last)'")
+            let url = directory.appendingPathComponent("frames.txt")
+            try (list.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+            return url
         }
     }
 

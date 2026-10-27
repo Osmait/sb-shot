@@ -11,7 +11,16 @@ scripts/generate-screenshots.sh            # all scenes
 scripts/generate-screenshots.sh editor pin # only some
 ```
 
-The app needs the Screen Recording permission, and each scene briefly shows a window on screen. The demo uses isolated settings, a temporary history and a synthetic wallpaper, so nothing from your machine ends up in the images. The two GIFs below still have to be recorded by hand.
+The app needs the Screen Recording permission, and each scene briefly shows a window on screen. The demo uses isolated settings, a temporary history and a synthetic wallpaper, so nothing from your machine ends up in the images.
+
+`demo.gif` and `demo.mp4` (annotating a capture, adding a background, then trimming a recording and giving it a background) are rendered the same way, frame by frame, and encoded with ffmpeg:
+
+```bash
+scripts/generate-demo-gif.sh        # 1200 px wide
+scripts/generate-demo-gif.sh 960    # smaller
+```
+
+The two capture and recording GIFs below still have to be recorded by hand.
 
 ## General guidelines
 
