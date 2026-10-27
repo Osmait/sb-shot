@@ -77,7 +77,7 @@ struct RecordingIntegrationTests {
 
         let red = CGColor(red: 1, green: 0, blue: 0, alpha: 1)
         let style = VideoBackgroundStyle(startColor: red, endColor: red, padding: 80, cornerRadius: 16, shadow: true, aspectRatio: 16.0 / 9.0)
-        let output = source.deletingPathExtension().appendingPathExtension("fondo.mp4")
+        let output = source.deletingPathExtension().appendingPathExtension("background.mp4")
         _ = try await VideoExporter.export(videoURL: source, to: output, timeRange: nil, removeAudio: true, background: style)
 
         let asset = AVURLAsset(url: output)
