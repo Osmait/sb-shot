@@ -196,11 +196,7 @@ The defaults avoid the macOS screenshot shortcuts (<kbd>⇧</kbd><kbd>⌘</kbd><
 
 ## Installation
 
-Download the latest `SbShot-x.y.z.dmg` from [Releases](https://github.com/Osmait/sb-shot/releases), open it and drag SbShot to Applications. Or use Homebrew:
-
-```sh
-brew install --cask osmait/tap/sb-shot
-```
+Download the latest `SbShot-x.y.z.dmg` from [Releases](https://github.com/Osmait/sb-shot/releases), open it and drag SbShot to Applications.
 
 sb-shot has no Dock icon: once it's running, use the camera icon in the menu bar.
 

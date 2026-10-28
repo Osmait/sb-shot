@@ -55,7 +55,7 @@ scripts/release.sh 0.2.0
 2. Add these secrets:
    - `NOTARY_KEY`: the `.p8` in base64 (`base64 -i AuthKey_XXXX.p8 | pbcopy`).
    - `NOTARY_KEY_ID`: the key ID.
-   - `NOTARY_ISSUER_ID`: the issuer ID shown above the key list.
+   - `NOTARY_ISSUER_ID`: the issuer ID shown above the key list, a UUID like `69a6de7e-…`. Only team keys have one; with an individual key, leave this secret out.
 
 To notarize local builds too, store the same key once in your Keychain:
 
