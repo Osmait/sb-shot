@@ -33,3 +33,6 @@ fastlane/test_output/
 
 # Test results
 *.xcresult
+
+# Release DMGs (scripts/release.sh)
+dist/

@@ -196,15 +196,23 @@ The defaults avoid the macOS screenshot shortcuts (<kbd>⇧</kbd><kbd>⌘</kbd><
 
 ## Installation
 
-There is no signed or notarized release yet, so for now sb-shot has to be built from source.
+Download the latest `SbShot-x.y.z.dmg` from [Releases](https://github.com/Osmait/sb-shot/releases), open it and drag SbShot to Applications. Or use Homebrew:
 
-### Requirements
+```sh
+brew install --cask osmait/tap/sb-shot
+```
+
+sb-shot has no Dock icon: once it's running, use the camera icon in the menu bar.
+
+### Build from source
+
+#### Requirements
 
 - macOS 15.6 or later
 - Xcode 26 or later (the project uses Xcode 26 build settings such as default `MainActor` isolation and approachable concurrency; it is developed with Xcode 26.3)
 - An Apple ID added to Xcode (a free Personal Team is enough to run it locally)
 
-### Build and run
+#### Build and run
 
 ```bash
 git clone https://github.com/Osmait/sb-shot.git
