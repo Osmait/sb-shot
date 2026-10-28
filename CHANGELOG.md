@@ -3,6 +3,10 @@
 All notable changes to sb-shot. Versions follow [Semantic Versioning](https://semver.org).
 Add a section for a version before releasing it; it becomes the summary of the release notes.
 
+## [0.1.1]
+
+- Added an app icon, shown in Finder, Launchpad, the DMG and System Settings.
+
 ## [0.1.0]
 
 First release.
