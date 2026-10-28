@@ -11,7 +11,7 @@ struct MenuBarLabel: View {
         case .processing:
             Image(systemName: "hourglass")
         case .idle, .preparing:
-            Image(systemName: "camera.viewfinder")
+            Image(nsImage: MenuBarIcon.image)
         }
     }
 }
