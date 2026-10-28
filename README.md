@@ -1,4 +1,12 @@
-# sb-shot
+<p align="center">
+  <img src="docs/media/icon.png" alt="sb-shot app icon" width="128">
+</p>
+
+<h1 align="center">sb-shot</h1>
+
+<p align="center">
+  <a href="https://github.com/Osmait/sb-shot/releases/latest"><strong>Download for macOS</strong></a>
+</p>
 
 A native macOS menu bar app for screenshots and screen recordings, with an annotation editor, a video editor, Quick Access and history. A free, open-source alternative to CleanShot X.
 

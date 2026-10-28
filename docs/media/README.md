@@ -47,6 +47,10 @@ screencapture -l <windowid> -x editor.png
 
 `screencapture -l <windowid> file.png` captures a single window (with shadow by default), `-o` removes the shadow, `-x` silences the sound.
 
+## App icon
+
+`icon.png` (256 × 256) is a copy of `sb-shot/Assets.xcassets/AppIcon.appiconset/icon_128x128@2x.png`, drawn by `swift scripts/make-icon.swift`. Copy it again after regenerating the icon.
+
 ## Shots
 
 | File | What it shows | Suggested size |
